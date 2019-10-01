@@ -10,10 +10,10 @@
 const REGION_SIZE = 1024000;  // Uint8 * 1024000 = 1MB
 const NUMBER_REGIONS = 256;
 
-const REGION_EDEN = 1;
-const REGION_SURVIVOR = 2;
-const REGION_TENURED = 3;
-const REGION_HUMOGOUS = 4;
+const REGION_EDEN = 11;
+const REGION_SURVIVOR = 12;
+const REGION_TENURED = 13;
+const REGION_HUMOGOUS = 14;
 
 const MONO_INT32 = 1;
 const MONO_ADDRESS = 1;  // the same as INT32.
@@ -37,15 +37,32 @@ function Heap() {
 Heap.prototype.createRegion = function() {
     const content = this.__rootedContents[this.__contentCounter];
     const beginFrom = this.__contentCounter * REGION_SIZE;
-    return new Region(REGION_EDEN, beginFrom, REGION_SIZE, content);
+    return new Region(this, beginFrom, REGION_SIZE, content);
+}
+
+Heap.prototype.fetchMono = function(address) {
+    const regionIndex = (address / REGION_SIZE >>0);
+    if (regionIndex > NUMBER_REGIONS) {
+        throw new Error("Address out of Region range: " + address);
+    }
+    const content = this.__rootedContents[regionIndex];
+    const contentIndex = address % REGION_SIZE;     // index inside the region.
+
+    const beginFrom = regionIndex * REGION_SIZE;
+    const region = new Region(this, beginFrom, REGION_SIZE, content);
+
+    const monoKind = content[contentIndex];  // 1 byte header uint8 can be read directly.
+    console.log("fetch mono: ", address, regionIndex, contentIndex, beginFrom, monoKind);
+    const mono = new Mono(region, monoKind, contentIndex);  // beginFrom of Mono is inside the region.
+    return mono;
 }
 
 // Regions are now fixed as 1MB by a const.
 // Each region contains Uint8Array with length 
 // GC only cares about regions, and it keeps their information in a preserved area 
 // (since we implement in JS runtime, they're stick to v8's native heap as object properties).
-function Region(kind, beginFrom, size, content) {
-    this.kind = kind;
+function Region(heap, beginFrom, size, content) {
+    this.heap = heap;
     this.beginFrom = beginFrom;
     this.size = size;
     this.endAt = beginFrom + size - 1;  // index
@@ -53,6 +70,8 @@ function Region(kind, beginFrom, size, content) {
     // Read how many Slot/byte (Uint8) has been used.
     // at any time content[counter] = the last byte has NOT been occupied.
     this.counter = 0;
+    this.kind = 0;
+    this.readKind();
     this.readCounter(); 
 }
 
@@ -193,11 +212,35 @@ Region.prototype.newFloat64 = function(at, float64) {
     this.counter += 8;
 }
 
+// Read the #4 byte from beginning to get the region kind.
+Region.prototype.readKind = function() {
+    const kind = this.readUint8(4);
+    if (0 === kind) {   // new region; eden.
+        this.kind = REGION_EDEN;
+        this.writeKind(REGION_EDEN);
+    } else {
+        this.kind = kind;
+    }
+}
+
+Region.prototype.writeKind = function(kind) {
+    switch (kind) {
+        case REGION_EDEN:
+        case REGION_SURVIVOR:
+        case REGION_TENURED:
+        case REGION_HUMOGOUS:
+            this.writeUint8(4, kind);
+            break;
+        default:
+            throw new Error("Unknown kind of the region: " + kind);
+    }
+}
+
 // Read the first 4 slots (32bit) to get the counter;
 Region.prototype.readCounter = function() {
     let counter = this.readUint32(0);
     if (0 === counter) { // new region
-        this.counter = 4;
+        this.counter = 5;   // counter + kind
         console.log("read counter: ", counter, this.counter)
         this.writeCounter()
     } else {
@@ -232,7 +275,7 @@ Region.prototype.createMono = function(kind) {
 
 // Traverse all monos. One by one call the callback
 Region.prototype.traverse = function(cb) {
-    for(let beginFrom = 4; beginFrom < this.counter;) {    // [0 - 3] is the counter.
+    for(let beginFrom = 5; beginFrom < this.counter;) {    // [0 - 3] is the counter [4] is kind.
         console.log('try to traverse mono at: ', beginFrom)
         kind = this.readUint8(beginFrom);
         if (0 === kind) {
@@ -278,7 +321,7 @@ Mono.prototype.sizeFromKind = function(kind) {
         case MONO_FLOAT64:
             return 9;   // 1 + 8
         case MONO_ARRAY_S8:
-            return 69;   // 1 + 8 * 8 + 4 (header + 8 slots + address to next)
+            return 41;   // 1 + 4 + 4 * 8 + 4 (header + array length + 8 slots + address to next)
         case MONO_STRING_S8:
             return 69;   // 1 + 8 * 8 + 4 (header + 8 slots + address to next)
         case MONO_OBJECT_S8:
@@ -288,6 +331,13 @@ Mono.prototype.sizeFromKind = function(kind) {
         default:
             throw new Error("Wrong Mono kind: " + kind)
     }
+}
+
+// Form the heap address of this mono's header.
+Mono.prototype.heapAddress = function() {
+    const regionOffset = this.beginFrom;
+    const heapIndex = this.region.beginFrom;
+    return heapIndex + regionOffset;
 }
 
 function Allocator(region) {
@@ -348,6 +398,34 @@ WrappedFloat64.prototype.write = function(hostFloat64) {
     return this.mono.region.writeFloat64(this.mono.valueFrom, hostFloat64);
 }
 
+// Dynamic typed array.
+// So it can only contain addresses of monos, actually.
+// And since we have all data structures in immutable,
+// operations will all allocate a new array while re-address old ones.
+function WrappedArray(mono) {
+    this.mono = mono;
+    this.elementsFrom = this.mono.valueFrom + 4;
+}
+
+WrappedArray.prototype.header = function() {
+    const length = this.mono.region.readUint32(this.mono.valueFrom);   // First 4 bytes are length.
+    return {
+        length
+    };
+}
+
+WrappedArray.prototype.index = function(idx) {
+    const header = this.header();
+    if (idx >= header.length || idx < 0) {
+        throw new Error("Index out of range: ", idx, 0, header.length)
+    }
+
+    const monoAt = this.elementsFrom + idx * 4
+    const monoAddress = this.mono.region.heap.readAddress(elementAt);
+    // Get element from the heap via full address.
+
+}
+
 function test() {
     const heap = new Heap();
     const testRegion = heap.createRegion();
@@ -358,6 +436,7 @@ function test() {
         testRegion.readUint8(2),
         testRegion.readUint8(3)
     );
+    console.log("----");
 
     for (let i = 0, newMono, hostFloat64; i < 4; i ++) {
         hostFloat64 = i + 0.91;
@@ -366,6 +445,7 @@ function test() {
         newWrapped.write(hostFloat64)
         console.log("float64: host value: ", hostFloat64, " read after write: ", newWrapped.read());
     }
+    console.log("----");
 
     for (let i = 0, newMono, hostInt32; i < 4; i ++) {
         hostInt32 = i * -1;
@@ -374,6 +454,17 @@ function test() {
         newWrapped.write(hostInt32)
         console.log("int32: host value: ", hostInt32, " read after write: ", newWrapped.read());
     }
+    console.log("----");
+
+    for (let i = 0, newMono, heapAddress, fetchedMono; i < 4; i ++) {
+        hostInt32 = i * -1;
+        newMono = testRegion.createMono(MONO_INT32);
+        heapAddress = newMono.heapAddress();
+        console.log("heap address of: [ ", newMono.beginFrom, " - ", newMono.endAt, " ]: ", heapAddress);
+        fetchedMono = heap.fetchMono(heapAddress);
+        console.log("create mono at heap: ", heapAddress, " and fetch it back from heap: [ ", fetchedMono.beginFrom, " - ", fetchedMono.endAt, " ]");
+    }
+    console.log("----");
 
     console.log("region usage: ", testRegion.counter);
 
