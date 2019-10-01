@@ -21,44 +21,12 @@ const applyOperator = (operator, leftOperand, rightOperand) => {
   throw Error(`Unknown operator: ${operator}`);
 };
 
+// Contains array of StackNode
+const stackMachine = [];
+
 // Question: How to validate the correctness of stack machine?
-class StackWorker {
-  constructor(ast) {
-    this.ast = ast;
-    this.globalVariableMap = new Map();
-    // Contains array of StackNode
-    this.stackMachine = [];
-  }
-
-  executeProgram() {
-    this.ast.body.forEach(node => {
-      switch (node.type) {
-        case 'VariableDeclaration':
-          node.declarations.forEach(variableDeclarator => {
-            // TODO:
-            // 1. consider the use case of array
-            // 2. consider the difference between local and global variable
-            const evaluatedValue = this.handleExpression(
-              variableDeclarator.init,
-              this.globalVariableMap,
-            );
-            // Question: do we need to check existence of id?
-            this.globalVariableMap.set(
-              variableDeclarator.id.name,
-              evaluatedValue,
-            );
-          });
-          break;
-        // TODO: Handle other types of statment (function call, if/else, for loop...)
-      }
-    });
-  }
-
-  handleStatement(node) {
-    console.log(`Handle statement ${node.type} at line: ${node.start}`);
-  }
-
-  handleExpression(node, variableMap) {
+function executeProgram(ast) {
+  const handleExpression = node => {
     console.log(`Handle expression ${node.type} at line: ${node.start}`);
     switch (node.type) {
       case 'Literal':
@@ -67,8 +35,8 @@ class StackWorker {
       case 'BinaryExpression':
         return applyOperator(
           node.operator,
-          this.handleExpression(node.left),
-          this.handleExpression(node.right),
+          handleExpression(node.left),
+          handleExpression(node.right),
         );
       case 'Identifier':
         return variableMap.get(node.name);
@@ -76,7 +44,33 @@ class StackWorker {
         // Question: What's the better way to store arrow function expression?
         return node;
     }
-  }
+  };
+
+  const variableMap = new Map();
+  ast.body.forEach(node => {
+    switch (node.type) {
+      case 'VariableDeclaration':
+        node.declarations.forEach(variableDeclarator => {
+          // TODO:
+          // 1. consider the use case of array
+          // 2. consider the difference between local and global variable
+          const evaluatedValue = handleExpression(
+            variableDeclarator.init,
+            variableMap,
+          );
+          // Question: do we need to check existence of id?
+          variableMap.set(variableDeclarator.id.name, evaluatedValue);
+        });
+        break;
+      case 'ExpressionStatement':
+        break;
+      // TODO: Handle other types of statment (function call, if/else, for loop...)
+    }
+  });
+
+  const handleStatement = node => {
+    console.log(`Handle statement ${node.type} at line: ${node.start}`);
+  };
 }
 
-module.exports = StackWorker;
+module.exports = executeProgram;

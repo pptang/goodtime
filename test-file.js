@@ -6,3 +6,5 @@ const main = () => {
   const result = [].map(mapper);
   return result;
 };
+
+main();

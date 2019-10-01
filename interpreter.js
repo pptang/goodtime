@@ -1,11 +1,10 @@
 const acorn = require('acorn');
 
-const StackWorker = require('./stack-worker');
+const executeProgram = require('./stack-worker');
 
 function interpreter(javascriptStr) {
   const ast = acorn.parse(javascriptStr);
-  const stackWorker = new StackWorker(ast);
-  stackWorker.executeProgram();
+  executeProgram(ast);
 }
 
 const ast = acorn.parse();
