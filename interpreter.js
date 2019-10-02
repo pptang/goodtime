@@ -25,6 +25,20 @@ const applyOperator = (operator, leftOperand, rightOperand) => {
   throw Error(`Unknown operator: ${operator}`);
 };
 
+const getVariableValueFromScopeChain = (variableName, currentVariableMap) => {
+  let result = currentVariableMap.get(variableName);
+  // console.log('current map:\n', currentVariableMap);
+  // console.log('variable name: \n', variableName);
+  // console.log('result:\n', result);
+  if (!result && currentVariableMap.get('outer') !== null) {
+    result = getVariableValueFromScopeChain(
+      variableName,
+      currentVariableMap.get('outer'),
+    );
+  }
+  return result;
+};
+
 // Use JavaScript to simulate how JS Engine interpretes
 // For V8 engine, it'll first compile the AST to Bytecode and interprete after,
 // while our experiment will interprete AST directly.
@@ -46,8 +60,7 @@ class Interpreter {
     if (!ast) {
       throw Error("AST Tree doesn't exist!");
     }
-    console.log('Current AST:\n', ast);
-
+    console.log('Current AST:\n', ast, '\n');
     const localVariableMap = new Map([['outer', outerLexicalEnv]]);
     // If any parameter is passed to the program, we should initialize them in the variable map
     if (ast.params && args) {
@@ -56,37 +69,66 @@ class Interpreter {
       });
     }
 
-    const handleExpression = node => {
-      console.log('\n\n');
-      console.log(`Handle ${node.type} at line: ${node.start}`);
+    const handleExpression = (node, callExpressionArgs) => {
+      console.log(`Handle ${node.type} at line: ${node.start}\n`);
       switch (node.type) {
         case 'Literal':
-          console.log(`Value: ${node.value}`);
+          console.log(`Value: ${node.value}\n`);
           // TODO: what if node.value is not a number?
           return node.value;
         case 'BinaryExpression':
-          console.log(`Operator: '${node.operator}'`);
+          console.log(`Operator: '${node.operator}'\n`);
           return applyOperator(
             node.operator,
             handleExpression(node.left),
             handleExpression(node.right),
           );
         case 'Identifier':
-          console.log(`Identifier Name: ${node.name}`);
-          return localVariableMap.get(node.name);
+          console.log(`Identifier Name: ${node.name}\n`);
+          return (
+            getVariableValueFromScopeChain(node.name, localVariableMap) ||
+            node.name
+          );
         case 'ArrowFunctionExpression':
           // Currently, we return root ast node of arrow function and store in the variable map.
           return node;
         case 'CallExpression':
-          console.log(`Type: ${node.callee.type}`);
+          console.log(`Type: ${node.callee.type}\n`);
           return this.executeProgram(
-            handleExpression(node.callee),
-            node.arguments,
+            handleExpression(node.callee, node.arguments.map(handleExpression)),
+            node.arguments.map(handleExpression),
             localVariableMap,
           );
-        case 'MemberExpression':
-          // How to handle embedded method like ArrayExpression?
+        case 'ObjectExpression':
+          console.log('Create a new Object.\n');
+          return node.properties.reduce(
+            (acc, property) =>
+              Object.assign({}, acc, {
+                [property.key.name]: property.value,
+              }),
+            {},
+          );
+        case 'ArrayExpression':
+          console.log('Current Array:', node.elements, '\n');
+          // TODO: Find a better to handle array expression;
           break;
+        case 'MemberExpression':
+          const propertyName = handleExpression(node.property);
+          console.log(`Field '${propertyName}' of :`);
+          // Question: How to pass ArrowFunction AST descriptor to host machine array.map? (how to execute the statement inside?)
+          if (node.object.type === 'ArrayExpression') {
+            console.log('Array');
+            const objField = Array.from(node.object.elements)[propertyName];
+            console.log('args:', callExpressionArgs);
+            return typeof objField === 'function'
+              ? objField(callExpressionArgs)
+              : objField;
+          } else {
+            const objName = handleExpression(node.object);
+            console.log(`Object '${objName}'`);
+            const objField = global[objName][propertyName];
+            return typeof objField === 'function' ? objField(args) : objField;
+          }
       }
     };
 
@@ -99,7 +141,7 @@ class Interpreter {
     statements.forEach(node => {
       switch (node.type) {
         case 'VariableDeclaration':
-          console.log(`Declare a ${node.kind} variable.`);
+          console.log(`Declare a ${node.kind} variable.\n`);
           node.declarations.forEach(variableDeclarator => {
             // TODO:
             // 1. consider the use case of array
@@ -114,6 +156,7 @@ class Interpreter {
               '\n',
               '[Value]:',
               evaluatedValue,
+              '\n',
             );
           });
           break;
