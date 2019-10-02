@@ -312,6 +312,7 @@ function Mono(region, kind, beginFrom) {
     this.endAt = beginFrom + this.sizeFromKind(kind) - 1; // index so -1
 }
 
+
 // Write header information onto region content.
 // REMEMBER TO CALL THIS: for any newly created Mono!
 Mono.prototype.writeHeader = function() {
@@ -438,16 +439,16 @@ function WrappedChunk(mono) {
     // [ valueFrom ] == 1 byte chunk length.
     // [ valueFrom + 1]  == first element's address
     this.elementsFrom = this.mono.valueFrom + 1;
+    this.atChunkLength = this.mono.valueFrom;
     this.atToNext = this.mono.endAt - 3;
 }
 
-
 WrappedChunk.prototype.readChunkLength = function() {
-    return this.mono.region.readUint8(this.mono.valueFrom); 
+    return this.mono.region.readUint8(this.atChunkLength); 
 }
 
 WrappedChunk.prototype.writeChunkLength = function(length) {
-    return this.mono.region.writeUint8(this.mono.valueFrom, length); 
+    return this.mono.region.writeUint8(this.atChunkLength, length)
 }
 
 // Append a new element into the chunk.
@@ -457,7 +458,7 @@ WrappedChunk.prototype.chunkAppend = function(wrapped) {
     // At [ elementFrom + length ] = last empty slot.
     // Write address so it will become a pointer.
     this.mono.region.writeAddress(
-        this.mono.elementFrom + currentLength,
+        this.elementsFrom + currentLength,
         wrapped.mono.heapAddress()
     )
     console.log("[chunkAppend]: at local address: ",
@@ -466,6 +467,7 @@ WrappedChunk.prototype.chunkAppend = function(wrapped) {
         wrapped.mono.heapAddress()
     );
     this.writeChunkLength(currentLength + 1);
+    console.log("---- after write, currentLength: ", this.readChunkLength());
 }
 
 WrappedChunk.prototype.chunkIndex = function(idxChunk) {
@@ -516,11 +518,11 @@ function WrappedArray(mono) {
 WrappedArray.prototype.readLength = function() {
     // NOTE: since we used Uint8 array, default should be 0,
     // so the new array will have 0 length as we want.
-    return this.mono.region.readUint32(this.mono.valueFrom);
+    return this.mono.region.readUint32(this.atLength);
 }
 
 WrappedArray.prototype.writeLength = function(length) {
-    this.mono.region.writeUint32(this.mono.valueFrom, length);
+    this.mono.region.writeUint32(this.atLength, length);
 }
 
 // Chunk funtions here is for the default chunk allocated along with the Array.
@@ -530,7 +532,7 @@ WrappedArray.prototype.readChunkLength = function() {
 }
 
 WrappedArray.prototype.writeChunkLength = function(length) {
-    return WrappedChunk.prototype.writeChunkLength.apply(this, [this.atChunkLength, length]);
+    return WrappedChunk.prototype.writeChunkLength.apply(this, [length]);
 }
 
 WrappedArray.prototype.chunkIndex = function(idxChunk) {
@@ -747,3 +749,8 @@ function testArray() {
 }
 
 testArray();
+
+// check append works:
+//  node ./heap.js | egrep 'allocate|chunkAppend'
+//
+//
