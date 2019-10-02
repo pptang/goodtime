@@ -1,7 +1,5 @@
 const acorn = require('acorn');
 
-const executeProgram = require('./stack-worker');
-
 // It may seem strange to do this mapping (I meant: from JS -> AST, but map AST operator back to execute in JS).
 // The weirdness results from using JS as runtime for our own convenience,
 // but imagine if we use some low level language runtime, this piece of code will be modified to map to its instruction set.
@@ -45,6 +43,9 @@ class Interpreter {
   // but also can be a function or a meaningful block (be more accurate later...)
   // and it represents a lexical scope.
   executeProgram(ast, args, outerLexicalEnv) {
+    if (!ast) {
+      throw Error("AST Tree doesn't exist!");
+    }
     console.log('Current AST:\n', ast);
 
     const localVariableMap = new Map([['outer', outerLexicalEnv]]);
@@ -56,6 +57,7 @@ class Interpreter {
     }
 
     const handleExpression = node => {
+      console.log('\n\n');
       console.log(`Handle ${node.type} at line: ${node.start}`);
       switch (node.type) {
         case 'Literal':
@@ -76,8 +78,8 @@ class Interpreter {
           // Currently, we return root ast node of arrow function and store in the variable map.
           return node;
         case 'CallExpression':
-          console.log(`Callee: ${node.callee}`);
-          return executeProgram(
+          console.log(`Type: ${node.callee.type}`);
+          return this.executeProgram(
             handleExpression(node.callee),
             node.arguments,
             localVariableMap,
@@ -97,6 +99,7 @@ class Interpreter {
     statements.forEach(node => {
       switch (node.type) {
         case 'VariableDeclaration':
+          console.log(`Declare a ${node.kind} variable.`);
           node.declarations.forEach(variableDeclarator => {
             // TODO:
             // 1. consider the use case of array
@@ -104,6 +107,14 @@ class Interpreter {
             const evaluatedValue = handleExpression(variableDeclarator.init);
             // Question: do we need to check existence of id?
             localVariableMap.set(variableDeclarator.id.name, evaluatedValue);
+            console.log(
+              'Variable Map stored new pairs,\n',
+              '[Key]:',
+              variableDeclarator.id.name,
+              '\n',
+              '[Value]:',
+              evaluatedValue,
+            );
           });
           break;
         case 'ExpressionStatement':
