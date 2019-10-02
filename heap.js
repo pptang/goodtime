@@ -61,10 +61,6 @@ Heap.prototype.fetchMono = function(address) {
     return mono;
 }
 
-Heap.prototype.allocator = function() {
-    return this.allocator;
-}
-
 // Regions are now fixed as 1MB by a const.
 // Each region contains Uint8Array with length 
 // GC only cares about regions, and it keeps their information in a preserved area 
@@ -386,8 +382,12 @@ Allocator.prototype.allocate = function(monoKind, wrappedConstructor) {
         this.regions.push(targetRegion);
     }
     const wrapped = new wrappedConstructor(targetRegion.createMono(monoKind));
-    console.log("allocated: ", wrapped.constructor.name, " at: # ", wrapped.mono.heapAddress());
+    console.log("[allocate]: ", wrapped.constructor.name, " at: # ", wrapped.mono.heapAddress());
     return wrapped;
+}
+
+Allocator.prototype.latestRegion = function() {
+    return this.regions[ this.regions.length - 1 ];
 }
 
 
@@ -435,9 +435,12 @@ WrappedFloat64.prototype.write = function(hostFloat64) {
 
 function WrappedChunk(mono) {
     this.mono = mono;
+    // [ valueFrom ] == 1 byte chunk length.
+    // [ valueFrom + 1]  == first element's address
     this.elementsFrom = this.mono.valueFrom + 1;
     this.atToNext = this.mono.endAt - 3;
 }
+
 
 WrappedChunk.prototype.readChunkLength = function() {
     return this.mono.region.readUint8(this.mono.valueFrom); 
@@ -451,20 +454,34 @@ WrappedChunk.prototype.writeChunkLength = function(length) {
 WrappedChunk.prototype.chunkAppend = function(wrapped) {
     if (this.isChunkFull()) { return false; }
     const currentLength = this.readChunkLength();
-    // At [ valueFrom + length ] = last empty slot.
-    // Write so it will become a pointer.
+    // At [ elementFrom + length ] = last empty slot.
+    // Write address so it will become a pointer.
     this.mono.region.writeAddress(
-        this.mono.valueFrom + currentLength,
+        this.mono.elementFrom + currentLength,
         wrapped.mono.heapAddress()
     )
+    console.log("[chunkAppend]: at local address: ",
+        this.elementsFrom + currentLength,
+        " appended address: # ",
+        wrapped.mono.heapAddress()
+    );
     this.writeChunkLength(currentLength + 1);
 }
 
 WrappedChunk.prototype.chunkIndex = function(idxChunk) {
     const monoAt = this.elementsFrom + idxChunk;
+    console.log("chunkIndex: elementsFrom: ",
+        this.elementsFrom,
+        " idxChunk: ",
+        idxChunk,
+        " content: ",
+        this.mono.region.readUint8(monoAt)
+    );
 
     // Get heap address stored in the chunk, at a region local address.
     const monoAddress = this.mono.region.readAddress(monoAt);
+
+
     // Get element from the heap via heap address.
     const fetched = this.mono.region.heap.fetchMono(monoAddress);
     return new Wrapped(mono);
@@ -537,9 +554,12 @@ WrappedArray.prototype.index = function(idx) {
     if (idx >= length || idx < 0) {
         throw new Error("Index out of range: ", idx, 0, header.length)
     }
-    const chunk = this.findChunk(idx);
+    let [_, latestChunk] = this.findChunk(idx);
+    if (latestChunk === false) {
+        throw new Error("Cannot find target chunk");
+    }
     const idxChunk = idx % 8;
-    return chunk.chunkIndex(idxChunk);
+    return latestChunk.chunkIndex(idxChunk);
 }
 
 WrappedArray.prototype.fetchNextChunk = function() {
@@ -579,7 +599,7 @@ WrappedArray.prototype.append = function(wrapped) {
     let [latestValidChunk, latestChunk] = this.findChunk(length); // [ length ] is the lastest empty slot to append.
 
     console.log(
-        "(append) at chunk: ",
+        "(append) at chunk: # ",
         this.mono.heapAddress(),
         " found chunk: # ",
         ( latestChunk ) ? latestChunk.mono.heapAddress() : false,
@@ -690,7 +710,6 @@ function testArray() {
     const heap = new Heap();
     const wrappedArray = heap.allocator.array();
 
-    const testRegion = heap.createRegion();
     for (let i = 0, newWrappedFloat64, newWrappedInt32, hostInt32, hostFloat64; i < 6; i ++) {
         hostFloat64 = i + 0.91;
         hostInt32 = i - 1;
@@ -709,6 +728,12 @@ function testArray() {
 
         console.log("[test array] array appended float and int", wrappedArray.readLength(), i);
     }
+
+    console.log("----");
+
+    heap.allocator.latestRegion().traverse((mono) => {
+        console.log('kind: ', mono.kind, ' [ ', mono.beginFrom, ' - ', mono.endAt, ' ]');
+    });
 
     console.log("----");
 
