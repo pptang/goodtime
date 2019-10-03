@@ -2,6 +2,16 @@
 // Inputs and outputs are wrapped values.
 // TODO: need an immutable monad with embedded flow.
 
+function NewFloat64(hostValue) {
+    const newFloat64 = this.mono.region.heap.allocator.float64(hostValue);
+
+}
+
+function NewInt32(hostValue) {
+    const newInt32 = this.mono.region.heap.allocator.int32(hostValue);
+}
+
+
 function NewArray() {
     const newArray = this.mono.region.heap.allocator.array();
     return newArray;
@@ -128,3 +138,17 @@ function testJSAPI() {
 }
 
 //testJSAPI();
+
+module.exports = {
+    ArrayConcat,
+    ArrayIndex,
+    ArrayLength,
+    ArrayPop,
+    ArrayPush,
+    ArrayRemove,
+    ArrayShift,
+    ArraySlice,
+    NewArray,
+    NewFloat64,
+    NewInt32
+};
