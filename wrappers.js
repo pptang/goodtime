@@ -105,6 +105,18 @@ WrappedChunk.prototype.chunkAppend = function(wrapped) {
     this.writeChunkLength(currentLength + 1);
 }
 
+// Not from wrapped but just an address.
+WrappedChunk.prototype.chunkAppendAddress = function(address) {
+    if (this.isChunkFull()) { return false; }
+    const currentLength = this.readChunkLength();
+
+    this.mono.region.writeAddress(
+        this.addressFromIndex(currentLength),
+        address
+    )
+    this.writeChunkLength(currentLength + 1);
+}
+
 WrappedChunk.prototype.chunkIndex = function(idxChunk) {
     const monoAt = this.addressFromIndex(idxChunk);
 
@@ -118,10 +130,12 @@ WrappedChunk.prototype.chunkIndex = function(idxChunk) {
 
 // Read all addresses in one chunk.
 WrappedChunk.prototype.traverseChunkAddresses = function(icb) {
-    for (let i = 0, loAddress;
+    console.log('>>>> >>>> readChunkLength: ', this.readChunkLength());
+    for (let i = 0, localAddress;
          i < this.readChunkLength(); i ++)
     {
         localAddress = this.addressFromIndex(i);
+    console.log('>>>>> traverseChunkAddresses', i, localAddress);
         icb(i, this.mono.region.readAddress(localAddress));
     } 
 }
@@ -299,6 +313,10 @@ WrappedArray.prototype.isChunkFull = function() {
 
 WrappedArray.prototype.chunkAppend = function(wrapped) {
     return WrappedChunk.prototype.chunkAppend.apply(this, [wrapped]);
+}
+
+WrappedArray.prototype.chunkAppendAddress = function(address) {
+    return WrappedChunk.prototype.chunkAppendAddress.apply(this, [address]);
 }
 
 WrappedArray.prototype.chunkToHost = function() {

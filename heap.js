@@ -290,7 +290,6 @@ Region.prototype.createMono = function(kind) {
 // Traverse all monos. One by one call the callback
 Region.prototype.traverse = function(cb) {
     for(let beginFrom = 5; beginFrom < this.counter;) {    // [0 - 3] is the counter [4] is kind.
-        console.log('try to traverse mono at: ', beginFrom)
         kind = this.readUint8(beginFrom);
         if (0 === kind) {
             // End of monos.

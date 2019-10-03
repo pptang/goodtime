@@ -35,9 +35,12 @@ const testMinorGC = () => {
         newWrapped.write(hostInt32)
         wrappedArray.append(newWrapped);
     }
+    console.log(">>>> array length", wrappedArray.length());
 
-    heap.gc.young.lessThan40[testARegion.beginFrom] = testARegion;
-    heap.gc.young.lessThan60[testBRegion.beginFrom] = testBRegion;
+    heap.gc.byKinds.young.lessThan40[testARegion.beginFrom] = testARegion;
+    heap.gc.byKinds.young.lessThan60[testBRegion.beginFrom] = testBRegion;
 
     heap.gc.minorGC();
 }
+
+testMinorGC();

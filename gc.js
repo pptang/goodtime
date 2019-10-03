@@ -39,13 +39,16 @@ GC.prototype.minorGC = function() {
         if (i >= lessThan60Keys.length) {
             break;
         }
+        let regionLessThan40 = byKind.lessThan40[lessThan40Keys[i]];
+        let regionLessThan60 = byKind.lessThan60[lessThan60Keys[i]];
         this.mergeRegions(
-            byKind, {}, lessThan40Keys[i], lessThan60Keys[i]
+            byKind, {}, regionLessThan40, regionLessThan60
         );
     }
 }
 
 GC.prototype.mergeRegions = function(byKind, mergedNewBase, lessThan40, lessThan60) {
+
     // 1. Give a new empty region.
     const newRegion = this.heap.createRegion();
     // 2. Record these 2 regions merge to new region in mergedNewBase
@@ -91,11 +94,15 @@ GC.prototype.mergeRegions = function(byKind, mergedNewBase, lessThan40, lessThan
                     newPointeeHeapAddress = newPointeeBase + pointeeOffset
                 }
 
-
                 // Okay we now create new mono on merged new region.
                 newMono = newRegion.createMono(mono.kind);
                 // Then copy what the original mono has with new heap address.
                 newWrapped = new WrappedAddress(mono);
+
+                // *if* need and already there is a new pointee heap address
+                // on the newly merged region.
+                //
+                // Otherwise, just copy the old heap address to newly mono on the newly merged region. 
                 newWrapped.write(newHeapAddress || wrapped.read());
                     
                 break;
@@ -104,20 +111,24 @@ GC.prototype.mergeRegions = function(byKind, mergedNewBase, lessThan40, lessThan
                 newMono = newRegion.createMono(mono.kind);
                 newWrapped = new WrappedArray(newMono)
             case Consts.MONO_CHUNK_S8:
-                wrapped = new WrappedChunk(mono);
+                wrapped = wrapped || new WrappedChunk(mono);
                 newMono = newMono || newRegion.createMono(mono.kind);
-                newWrapped = new WrappedChunk(newMono)
+                newWrapped = newWrapped || new WrappedChunk(newMono)
 
-                wrapped.traverseChunkAddress((idx, pointeeHeapAddress) => {
-                    pointedRegion = this.heap.fetchRegion(pointeeHeapAddress);
+                wrapped.traverseChunkAddresses((idx, pointeeHeapAddress) => {
+                    pointeeRegion = this.heap.fetchRegion(pointeeHeapAddress);
                     pointeeOffset = pointeeHeapAddress - pointeeRegion.beginFrom;
                     if (mergedNewBase[pointeeRegion.beginFrom]) {
                         newPointeeBase = mergedNewBase[pointeeRegion.beginFrom];
                         newPointeeHeapAddress = newPointeeBase + pointeeOffset;
                     }
-                    newWrapped.append(newPointeeHeapAddress || pointeeHeapAddress);
+                    // *if* need and already there is a new pointee heap address
+                    // on the newly merged region.
+                    //
+                    // Otherwise, just copy the old heap address to newly mono on the newly merged region. 
+                    newWrapped.chunkAppendAddress(newPointeeHeapAddress || pointeeHeapAddress);
                     console.log("...debug for read back merged heap address: #",
-                        idx, pointeeHeapAddress, ' to: ', newWrapped.index(idx)
+                        idx, pointeeHeapAddress, ' to: ', newPointeeHeapAddress , ' with ' ,  newWrapped.chunkIndex(idx).dispatch().read()
                     );
                 });
                 break;
