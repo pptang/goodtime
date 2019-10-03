@@ -4,7 +4,7 @@ const mapper = i => {
 
 const main = () => {
   const result = 123;
-  return result;
+  return result + 3;
 };
 
 console.log(main());

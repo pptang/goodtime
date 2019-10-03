@@ -1,5 +1,6 @@
 const acorn = require('acorn');
 
+const jsApi = require('./jsapi');
 // It may seem strange to do this mapping (I meant: from JS -> AST, but map AST operator back to execute in JS).
 // The weirdness results from using JS as runtime for our own convenience,
 // but imagine if we use some low level language runtime, this piece of code will be modified to map to its instruction set.
@@ -43,7 +44,8 @@ const getVariableValueFromScopeChain = (variableName, currentVariableMap) => {
 // For V8 engine, it'll first compile the AST to Bytecode and interprete after,
 // while our experiment will interprete AST directly.
 class Interpreter {
-  constructor(javascriptStr) {
+  constructor(heap, javascriptStr) {
+    this.heap = heap;
     this.ast = acorn.parse(javascriptStr);
     // Simulate lexical environment for scope chain and the global environment is the outmost one.
     this.globalVariableMap = new Map([['outer', null]]);

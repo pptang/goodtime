@@ -1,6 +1,16 @@
 const fs = require('fs');
+
 const Interpreter = require('./interpreter');
+const { Heap } = require('./heap');
+
 const testFilePath = __dirname + '/test-file.js';
 
-const interpreter = new Interpreter(fs.readFileSync(testFilePath).toString());
+// Initialize the Heap, decide Heap size, separate into regions,
+// initialize the Allocator, counters and assign the first region to it.
+const heap = new Heap();
+
+const interpreter = new Interpreter(
+  heap,
+  fs.readFileSync(testFilePath).toString(),
+);
 interpreter.interprete();
