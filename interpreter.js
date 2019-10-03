@@ -69,7 +69,7 @@ class Interpreter {
       });
     }
 
-    const handleExpression = (node, callExpressionArgs) => {
+    const handleExpression = node => {
       console.log(`Handle ${node.type} at line: ${node.start}\n`);
       switch (node.type) {
         case 'Literal':
@@ -93,12 +93,7 @@ class Interpreter {
           // Currently, we return root ast node of arrow function and store in the variable map.
           return node;
         case 'CallExpression':
-          console.log(`Type: ${node.callee.type}\n`);
-          return this.executeProgram(
-            handleExpression(node.callee, node.arguments.map(handleExpression)),
-            node.arguments.map(handleExpression),
-            localVariableMap,
-          );
+          return handleCallExpression(node.callee, node.arguments);
         case 'ObjectExpression':
           console.log('Create a new Object.\n');
           return node.properties.reduce(
@@ -112,23 +107,46 @@ class Interpreter {
           console.log('Current Array:', node.elements, '\n');
           // TODO: Find a better to handle array expression;
           break;
+        // case 'MemberExpression':
+        // Question: How to pass ArrowFunction AST descriptor to host machine array.map? (how to execute the statement inside?)
+        // if (node.object.type === 'ArrayExpression') {
+        //   throw Error('Array is not supported yet.');
+        // const objField = Array.from(node.object.elements)[propertyName];
+        // console.log('objField', objField);
+        // console.log('args:', callExpressionArgs);
+        // return typeof objField === 'function'
+        //   ? objField(i => i + 1)
+        //   : objField;
+        // } else {
+        //   const objName = handleExpression(node.object);
+        //   console.log(`Object '${objName}'`);
+        //   const propertyName = handleExpression(node.property);
+        //   const objField = global[objName][propertyName];
+        //   return typeof objField === 'function'
+        //     ? objField(handleExpression(callExpressionArgs))
+        //     : objField;
+        // }
+      }
+    };
+
+    const handleCallExpression = (callee, callArgs) => {
+      console.log('[Callee]:', callee);
+      console.log('[Args]:', callArgs);
+      switch (callee.type) {
         case 'MemberExpression':
-          const propertyName = handleExpression(node.property);
-          console.log(`Field '${propertyName}' of :`);
-          // Question: How to pass ArrowFunction AST descriptor to host machine array.map? (how to execute the statement inside?)
-          if (node.object.type === 'ArrayExpression') {
-            console.log('Array');
-            const objField = Array.from(node.object.elements)[propertyName];
-            console.log('args:', callExpressionArgs);
-            return typeof objField === 'function'
-              ? objField(callExpressionArgs)
-              : objField;
-          } else {
-            const objName = handleExpression(node.object);
-            console.log(`Object '${objName}'`);
-            const objField = global[objName][propertyName];
-            return typeof objField === 'function' ? objField(args) : objField;
-          }
+          const objName = handleExpression(callee.object);
+          console.log(`Object '${objName}'`);
+          const propertyName = handleExpression(callee.property);
+          const objField = global[objName][propertyName];
+          return typeof objField === 'function'
+            ? objField(...callArgs.map(handleExpression))
+            : objField;
+        case 'Identifier':
+          return this.executeProgram(
+            handleExpression(callee),
+            callArgs.map(handleExpression),
+            localVariableMap,
+          );
       }
     };
 
@@ -138,7 +156,9 @@ class Interpreter {
     if (ast.type === 'ArrowFunctionExpression') {
       statements = ast.body.body;
     }
+    let returnValue;
     statements.forEach(node => {
+      console.log(`Handle ${node.type}\n`);
       switch (node.type) {
         case 'VariableDeclaration':
           console.log(`Declare a ${node.kind} variable.\n`);
@@ -165,10 +185,12 @@ class Interpreter {
         case 'BlockStatement':
           break;
         case 'ReturnStatement':
-          return handleExpression(node.argument);
+          returnValue = handleExpression(node.argument);
+          break;
         // TODO: Handle other types of statment (if/else, for loop...)
       }
     });
+    return returnValue;
   }
 }
 
