@@ -3,8 +3,8 @@ const mapper = i => {
 };
 
 const main = () => {
-  const result = [].map(mapper);
+  const result = 123;
   return result;
 };
 
-main();
+console.log(main());
