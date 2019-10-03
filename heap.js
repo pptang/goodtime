@@ -7,57 +7,70 @@
 // The worst case is memory leaks and no region available anymore.
 // Then the Heap will throw a OOM (program crashed)
 
-const REGION_SIZE = 1024000;  // Uint8 * 1024000 = 1MB
-const NUMBER_REGIONS = 256;
-
-const REGION_EDEN = 11;
-const REGION_SURVIVOR = 12;
-const REGION_TENURED = 13;
-const REGION_HUMOGOUS = 14;
-
-const MONO_INT32 = 1;
-const MONO_ADDRESS = 11; 
-const MONO_FLOAT64 = 2;
-const MONO_ARRAY_S8 = 3;
-const MONO_CHUNK_S8 = 31;
-const MONO_STRING_S8 = 4;
-const MONO_OBJECT_S8 = 5;
-const MONO_NAMED_PROPERTY_S8 = 6;   // (addressToStringMono, addressToMono) * 8
-
-const MONO_CHUNK_SIZE = 8;  // 8 elements per chunk.
+const { GC } = require('./gc');
+const { Consts } = require('./consts');
+const {
+    Wrapped,
+    WrappedArray,
+    WrappedChunk,
+    WrappedFloat64,
+    WrappedArrress,
+    WrappedInt32,
+    WrappedObject
+} = require('./wrappers');
 
 function Heap() {
 
     // We need this 'root' to prevent an unreferenced typed array gone.
     // This is because we don't control the real memory.
-    this.__rootedContents = [ new Uint8Array(REGION_SIZE) ];
-    for (let i = 0; i < NUMBER_REGIONS; i ++) {
-        this.__rootedContents.push(new Uint8Array(REGION_SIZE));
+    this.__rootedContents = [ new Uint8Array(Consts.REGION_SIZE) ];
+    for (let i = 0; i < Consts.NUMBER_REGIONS; i ++) {
+        this.__rootedContents.push(new Uint8Array(Consts.REGION_SIZE));
     }
     this.__contentCounter = 0;
     this.allocator = new Allocator(this, this.createRegion());
+
+    // TODO: Can do some fun subsitutation by config if we have GC factory.
+    this.gc = new GC(this);
 }
 
 Heap.prototype.createRegion = function() {
+    if (this.__contentCounter >= this.__rootedContents.length) {
+        throw new Error("OOM: cannot create region anymore.");
+    }
     const content = this.__rootedContents[this.__contentCounter];
-    const beginFrom = this.__contentCounter * REGION_SIZE;
-    return new Region(this, beginFrom, REGION_SIZE, content);
+    const beginFrom = this.__contentCounter * Consts.REGION_SIZE;
+    this.__contentCounter += 1;
+    return new Region(this, beginFrom, Consts.REGION_SIZE, content);
 }
 
 Heap.prototype.fetchMono = function(address) {
-    const regionIndex = (address / REGION_SIZE >>0);
-    if (regionIndex > NUMBER_REGIONS) {
+    const regionIndex = (address / Consts.REGION_SIZE >>0);
+    if (regionIndex > Consts.NUMBER_REGIONS) {
         throw new Error("Address out of Region range: " + address);
     }
     const content = this.__rootedContents[regionIndex];
-    const contentIndex = address % REGION_SIZE;     // index inside the region.
+    const contentIndex = address % Consts.REGION_SIZE;     // index inside the region.
 
-    const beginFrom = regionIndex * REGION_SIZE;
-    const region = new Region(this, beginFrom, REGION_SIZE, content);
+    const beginFrom = regionIndex * Consts.REGION_SIZE;
+    const region = new Region(this, beginFrom, Consts.REGION_SIZE, content);
 
     const monoKind = content[contentIndex];  // 1 byte header uint8 can be read directly.
     const mono = new Mono(region, monoKind, contentIndex);  // beginFrom of Mono is inside the region.
     return mono;
+}
+
+Heap.prototype.fetchRegion = function(address) {
+    const regionIndex = (address / Consts.REGION_SIZE >>0);
+    if (regionIndex > Consts.NUMBER_REGIONS) {
+        throw new Error("Address out of Region range: " + address);
+    }
+    const content = this.__rootedContents[regionIndex];
+    const contentIndex = address % Consts.REGION_SIZE;     // index inside the region.
+
+    const beginFrom = regionIndex * Consts.REGION_SIZE;
+    const region = new Region(this, beginFrom, Consts.REGION_SIZE, content);
+    return region;
 }
 
 // Regions are now fixed as 1MB by a const.
@@ -219,8 +232,8 @@ Region.prototype.newFloat64 = function(at, float64) {
 Region.prototype.readKind = function() {
     const kind = this.readUint8(4);
     if (0 === kind) {   // new region; eden.
-        this.kind = REGION_EDEN;
-        this.writeKind(REGION_EDEN);
+        this.kind = Consts.REGION_EDEN;
+        this.writeKind(Consts.REGION_EDEN);
     } else {
         this.kind = kind;
     }
@@ -228,8 +241,8 @@ Region.prototype.readKind = function() {
 
 Region.prototype.writeKind = function(kind) {
     switch (kind) {
-        case REGION_EDEN:
-        case REGION_SURVIVOR:
+        case Consts.REGION_EDEN:
+        case Consts.REGION_SURVIVOR:
         case REGION_TENURED:
         case REGION_HUMOGOUS:
             this.writeUint8(4, kind);
@@ -270,6 +283,7 @@ Region.prototype.createMono = function(kind) {
     const mono = new Mono(this, kind, this.counter);
     mono.writeHeader();
     this.counter += increase;
+    this.writeCounter();
     return mono;
 }
 
@@ -316,20 +330,20 @@ Mono.prototype.writeHeader = function() {
 
 Mono.prototype.sizeFromKind = function(kind) {
     switch (kind) {
-        case MONO_INT32:
-        case MONO_ADDRESS:
+        case Consts.MONO_INT32:
+        case Consts.MONO_ADDRESS:
             return 5;    // 1 + 4 (header: 1 byte + int32)
-        case MONO_FLOAT64:
+        case Consts.MONO_FLOAT64:
             return 9;   // 1 + 8
-        case MONO_ARRAY_S8:
+        case Consts.MONO_ARRAY_S8:
             return 42;   // 1 + 4 + 1 + 4 * 8 + 4 (header + array length + init chunk length + 8 slots + address to next)
-        case MONO_CHUNK_S8:
+        case Consts.MONO_CHUNK_S8:
             return 38;    // 1 + 1 + 4 * 8 + 4 (header + chunk length + 8 slots + address to next)
-        case MONO_STRING_S8:
+        case Consts.MONO_STRING_S8:
             return 69;   // 1 + 8 * 8 + 4 (header + 8 slots + address to next)
-        case MONO_OBJECT_S8:
+        case Consts.MONO_OBJECT_S8:
             return 73;   // 1 + 8 * 8  + 4 + 4 (header + 8 slots + address to name/address dict + address to next)
-        case MONO_NAMED_PROPERTY_S8:
+        case Consts.MONO_NAMED_PROPERTY_S8:
             return 73;   // 1 + (4 + 4) * 8 + 4 (header + address pairs + address to next)
         default:
             throw new Error("Wrong Mono kind: " + kind)
@@ -350,16 +364,16 @@ function Allocator(heap, defaultRegion) {
 
 // TODO: accept host array and fill it to wrapped one.
 Allocator.prototype.array = function() {
-    const result = this.allocate(MONO_ARRAY_S8, WrappedArray);
+    const result = this.allocate(Consts.MONO_ARRAY_S8, WrappedArray);
     return result;
 }
 
 Allocator.prototype.chunk = function() {
-    return this.allocate(MONO_CHUNK_S8, WrappedChunk);
+    return this.allocate(Consts.MONO_CHUNK_S8, WrappedChunk);
 }
 
 Allocator.prototype.float64 = function(hostValue) {
-    const result = this.allocate(MONO_FLOAT64, WrappedFloat64);
+    const result = this.allocate(Consts.MONO_FLOAT64, WrappedFloat64);
     if (hostValue) {
         result.write(hostValue);
     }
@@ -367,7 +381,7 @@ Allocator.prototype.float64 = function(hostValue) {
 }
 
 Allocator.prototype.int32 = function(hostValue) {
-    const result = this.allocate(MONO_INT32, WrappedInt32);
+    const result = this.allocate(Consts.MONO_INT32, WrappedInt32);
     if (hostValue) {
         result.write(hostValue);
     }
@@ -390,387 +404,6 @@ Allocator.prototype.latestRegion = function() {
     return this.regions[ this.regions.length - 1 ];
 }
 
-
-function WrappedObject(mono) {
-    this.mono = mono;
-}
-
-// Int and Float can be directly written to the slots.
-WrappedObject.prototype.write = function(propertyName, hostValue) {
-    
-}
-
-// Otherwise, it is a thing already on the heap.
-WrappedObject.prototype.attach = function(propertyName, mono) {
-
-}
-
-WrappedObject.prototype.detach = function(propertyName) {
-
-}
-
-// @public
-function WrappedInt32(mono) {
-    this.mono = mono;
-}
-
-// @public
-WrappedInt32.prototype.read = function() {
-    return this.mono.region.readInt32(this.mono.valueFrom);
-}
-
-// @public
-WrappedInt32.prototype.write = function(hostInt32) {
-    return this.mono.region.writeInt32(this.mono.valueFrom, hostInt32);
-}
-
-// @public
-function WrappedFloat64(mono) {
-    this.mono = mono;
-}
-
-// @public
-WrappedFloat64.prototype.read = function() {
-    return this.mono.region.readFloat64(this.mono.valueFrom);
-}
-
-// @public
-WrappedFloat64.prototype.write = function(hostFloat64) {
-    return this.mono.region.writeFloat64(this.mono.valueFrom, hostFloat64);
-}
-
-function WrappedChunk(mono) {
-    this.mono = mono;
-    // [ valueFrom ] == 1 byte chunk length.
-    // [ valueFrom + 1]  == first element's address
-    this.elementsFrom = this.mono.valueFrom + 1;
-    this.atChunkLength = this.mono.valueFrom;
-    this.atToNext = this.mono.endAt - 3;
-}
-
-WrappedChunk.prototype.readChunkLength = function() {
-    return this.mono.region.readUint8(this.atChunkLength); 
-}
-
-WrappedChunk.prototype.writeChunkLength = function(length) {
-    return this.mono.region.writeUint8(this.atChunkLength, length)
-}
-
-// Append a new element into the chunk.
-// Write address so it will become a pointer.
-// 
-// Let's say this chunk's first slot is at region address 11: 
-// region address: 11 + 0 * 4  - [ 32bits pointer ]
-//                 11 + 1 * 4  - [ 32bits pointer ]
-//                  ...
-WrappedChunk.prototype.chunkAppend = function(wrapped) {
-    if (this.isChunkFull()) { return false; }
-    const currentLength = this.readChunkLength();
-
-    this.mono.region.writeAddress(
-        this.addressFromIndex(currentLength),
-        wrapped.mono.heapAddress()
-    )
-    this.writeChunkLength(currentLength + 1);
-}
-
-WrappedChunk.prototype.chunkIndex = function(idxChunk) {
-    const monoAt = this.addressFromIndex(idxChunk);
-
-    // Get heap address stored in the chunk, at a region local address.
-    const monoAddress = this.mono.region.readAddress(monoAt);
-
-    // Get element from the heap via heap address.
-    const fetched = this.mono.region.heap.fetchMono(monoAddress);
-    return new Wrapped(fetched);
-}
-
-WrappedChunk.prototype.traverseChunkAddresses = function(icb) {
-    for (let i = 0, regionAddress;
-         i < this.readChunkLength(); i ++)
-    {
-        regionAddress = this.addressFromIndex(i);
-        icb(i, this.mono.region.readAddress(regionAddress));
-    } 
-}
-
-
-// Debugging function.
-// Return a `{ regionAddress: heapAddress }` object
-WrappedChunk.prototype.chunkToHost = function() {
-    const result = {};
-    this.traverseChunkAddresses((i, address) => {
-        regionAddress = this.addressFromIndex(i);
-        result[regionAddress] =
-            this.mono.region.readAddress(regionAddress);
-    });
-
-    return result;
-}
-
-WrappedChunk.prototype.setChunkNext = function(heapAddress) {
-    this.mono.region.writeAddress(this.atToNext, heapAddress);
-}
-
-WrappedChunk.prototype.fetchNextChunk = function() {
-    // from latest [-3, -2, -1, -0] is the address of the next chunk.
-    const nextChunkAddress = this.mono.region.readAddress(this.atToNext);
-    if (0 === nextChunkAddress) {  // not connected to next chunk yet.
-        return false;
-    }
-    const nextChunkMono = this.mono.region.heap.fetchMono(nextChunkAddress);
-    return new WrappedChunk(nextChunkMono);
-}
-
-WrappedChunk.prototype.isChunkFull = function(wrapped) {
-    const length = this.readChunkLength();
-    if (length + 1 > MONO_CHUNK_SIZE) {
-        return true;
-    }
-    return false;
-}
-
-// Region address from index.
-WrappedChunk.prototype.addressFromIndex = function(idx) {
-    return this.elementsFrom + idx * 4;
-}
-
-// Dynamic typed array.
-// So it can only contain addresses of monos, actually.
-// And since we have all data structures in immutable,
-// operations will all allocate a new array while re-addressing old elements.
-//
-// @public
-function WrappedArray(mono) {
-    this.mono = mono;
-    // First 4 bytes are length.
-    // Then 1 byte for chunk length (init chunk is connected with array mono header)
-    this.elementsFrom = this.mono.valueFrom + 5;
-    this.atLength = this.mono.valueFrom;            // [ 1 - 4 ] is array length, here: [1]
-    this.atChunkLength = this.mono.valueFrom + 4;   // [ 5 ] is default chunk length, here: [5]
-    this.atToNext = this.mono.endAt - 3;            // [-3 - -0] is address (pointer) to next chunk
-}
-
-
-// @public
-WrappedArray.prototype.index = function(idx) {
-    const length = this.readLength();
-    if (idx >= length || idx < 0) {
-        throw new Error("Index out of range: " + idx + ' vs. ' + length);
-    }
-    let [_, latestChunk] = this.findChunk(idx);
-    if (latestChunk === false) {
-        throw new Error("Cannot find target chunk");
-    }
-    const idxChunk = idx % 8;
-    return latestChunk.chunkIndex(idxChunk);
-}
-
-// @public
-WrappedArray.prototype.append = function(wrapped) {
-    const length = this.readLength();
-    let [latestValidChunk, latestChunk] = this.findChunk(length); // [ length ] is the lastest empty slot to append.
-
-    // array[length] to append at the next chunk is not yet there.
-    // Like, now it tries to append at array[8] == chunk#1, while array[0 - 7] is at chunk#0
-    // array[15] OK if one connected; array[16]
-    if (latestChunk === false || latestChunk.isChunkFull()) {
-        // allocate a new chunk (may trigger GC)
-        const newChunk = this.mono.region.heap.allocator.chunk();
-
-        // If it is just full then latestValidChunk == latestChunk.
-        latestValidChunk.setChunkNext(newChunk.mono.heapAddress());
-        latestChunk = newChunk;
-    }
-    latestChunk.chunkAppend(wrapped);
-    this.writeLength(length + 1);
-}
-
-// Clone addresses in each chunk to new array.
-// The underlying `chunkIndex` and `chunkAppend` will
-// fetch the mono, wrap it, return without dispatching,
-// then get its heap address to store.
-//
-// Some overhead could be avoidable if we directly access
-// and copy the address without wrapping.
-//
-// @public
-WrappedArray.prototype.clone = function(from, to) {
-    const newArray = this.mono.region.heap.allocator.array();
-    for (let i = 0; i < this.length(); i ++) {
-        newArray.append(this.index(i));
-    }
-    return newArray;
-}
-
-// @public
-WrappedArray.prototype.cloneFromTo = function(from, to) {
-    const currentLength = this.readLength();
-    if (from < 0 || from >= currentLength) {
-        throw new Error("Invalid clone from: ", from, to);
-    }
-    if (to < from || to >= currentLength) {
-        throw new Error("Invalid clone to: ", to, to);
-    }
-    const newArray = this.mono.region.heap.allocator.array();
-    for (let i = from; i <= to; i ++) {
-        newArray.append(this.index(i));
-    }
-    return newArray;
-}
-
-// Slow, expensive but we have no time for clever methods.
-// TODO: should have better method.
-WrappedArray.prototype.concat = function(second) {
-    const newArray = this.mono.region.heap.allocator.array();
-    for (let i = 0; i < this.readLength(); i ++) {
-        newArray.append(this.index(i));
-    }
-    for (let i = 0; i < second.readLength(); i ++) {
-        newArray.append(second.index(i));
-    }
-    return newArray;
-}
-
-// @public
-WrappedArray.prototype.length = function() {
-    return this.readLength();
-}
-
-WrappedArray.prototype.readLength = function() {
-    // NOTE: since we used Uint8 array, default should be 0,
-    // so the new array will have 0 length as we want.
-    return this.mono.region.readUint32(this.atLength);
-}
-
-WrappedArray.prototype.writeLength = function(length) {
-    this.mono.region.writeUint32(this.atLength, length);
-}
-
-// Chunk funtions here is for the default chunk allocated along with the Array.
-
-WrappedArray.prototype.readChunkLength = function() {
-   return WrappedChunk.prototype.readChunkLength.apply(this, []);
-}
-
-WrappedArray.prototype.writeChunkLength = function(length) {
-    return WrappedChunk.prototype.writeChunkLength.apply(this, [length]);
-}
-
-WrappedArray.prototype.chunkIndex = function(idxChunk) {
-    return WrappedChunk.prototype.chunkIndex.apply(this, [idxChunk]);
-}
-
-WrappedArray.prototype.isChunkFull = function() {
-    return WrappedChunk.prototype.isChunkFull.apply(this, []);
-}
-
-WrappedArray.prototype.chunkAppend = function(wrapped) {
-    return WrappedChunk.prototype.chunkAppend.apply(this, [wrapped]);
-}
-
-WrappedArray.prototype.chunkToHost = function() {
-    return WrappedChunk.prototype.chunkToHost.apply(this, []);
-}
-
-WrappedArray.prototype.setChunkNext = function(heapAddress) {
-    return WrappedChunk.prototype.setChunkNext.apply(this, [heapAddress]);
-}
-
-WrappedArray.prototype.addressFromIndex = function(idx) {
-    return WrappedChunk.prototype.addressFromIndex.apply(this, [idx]);
-}
-
-WrappedArray.prototype.traverseChunkAddresses = function(icb) {
-    return WrappedChunk.prototype.traverseChunkAddresses.apply(this, [icb]);
-}
-
-WrappedArray.prototype.fetchNextChunk = function() {
-    return WrappedChunk.prototype.fetchNextChunk.apply(this, []);
-}
-
-// Given index, give chunk it should be in.
-WrappedArray.prototype.findChunk = function(idx) {
-    const targetChunkId = (idx/MONO_CHUNK_SIZE>>0);
-    let targetChunk;
-    if (0 === targetChunkId) {  // this array base + default chunk.
-        targetChunk = this;
-    } else {
-        let validChunk = this
-        let fetchedChunk = this;
-        for (let chunkId = 0; chunkId < targetChunkId; chunkId ++) {
-            fetchedChunk = validChunk.fetchNextChunk();
-            if (false === fetchedChunk) {
-                return [validChunk, false];
-            }
-            validChunk = fetchedChunk;
-
-        }
-        targetChunk = fetchedChunk;
-    }
-    return [targetChunk, targetChunk];
-}
-
-WrappedArray.prototype.traverseChunks = function(cb) {
-    const latestChunkId = ((this.length() - 1)/MONO_CHUNK_SIZE>>0);
-
-    if (0 === latestChunkId) {  // this array base + default chunk.
-        cb(this);
-    } else {
-        let validChunk = this
-        let fetchedChunk = this;
-        for (let chunkId = 0; chunkId < latestChunkId; chunkId ++) {
-            fetchedChunk = validChunk.fetchNextChunk()
-            if (false === fetchedChunk) {
-                return; // latest chunk will has invalid next chunk.
-            }
-            cb(validChunk);
-            validChunk = fetchedChunk;
-        }
-    }
-}
-
-WrappedArray.prototype.lastestChunk = function() {
-    const [_, latestChunk] = this.findChunk(this.length() - 1);
-    if (!lastChunk) {
-        throw new Error("Index wrong to find latestChunk");
-    }
-    return latestChunk;
-}
-
-
-function Wrapped(mono) {
-    this.mono = mono;
-}
-
-// TODO: return Monad to encapsulate operations.
-
-// From generic Wrapped to like WrappedFloat64, according to the mono kind.
-Wrapped.prototype.dispatch = function() {
-    switch (this.mono.kind) {
-        case MONO_INT32:
-            return new WrappedInt32(this.mono);
-        case MONO_ADDRESS:
-            return this;    // TODO
-        case MONO_FLOAT64:
-            return new WrappedFloat64(this.mono);
-        case MONO_ARRAY_S8:
-            return new WrappedArray(this.mono);
-        case MONO_STRING_S8:
-            return this;    // TODO
-        case MONO_OBJECT_S8:
-            return this;    // TODO
-        case MONO_NAMED_PROPERTY_S8:
-            return this;    // TODO
-        default:
-            throw new Error("Wrong Mono kind: " + this.mono.kind)
-    }
-}
-
-Wrapped.prototype.read = function() {
-    return null;
-}
-
 function test() {
     const heap = new Heap();
     const testRegion = heap.createRegion();
@@ -785,7 +418,7 @@ function test() {
 
     for (let i = 0, newMono, hostFloat64; i < 4; i ++) {
         hostFloat64 = i + 0.91;
-        newMono = testRegion.createMono(MONO_FLOAT64);
+        newMono = testRegion.createMono(Consts.MONO_FLOAT64);
         newWrapped = new WrappedFloat64(newMono);
         newWrapped.write(hostFloat64)
         console.log("float64: host value: ", hostFloat64, " read after write: ", newWrapped.read());
@@ -794,7 +427,7 @@ function test() {
 
     for (let i = 0, newMono, hostInt32; i < 4; i ++) {
         hostInt32 = i * -1;
-        newMono = testRegion.createMono(MONO_INT32);
+        newMono = testRegion.createMono(Consts.MONO_INT32);
         newWrapped = new WrappedInt32(newMono);
         newWrapped.write(hostInt32)
         console.log("int32: host value: ", hostInt32, " read after write: ", newWrapped.read());
@@ -803,7 +436,7 @@ function test() {
 
     for (let i = 0, newMono, heapAddress, fetchedMono; i < 4; i ++) {
         hostInt32 = i * -1;
-        newMono = testRegion.createMono(MONO_INT32);
+        newMono = testRegion.createMono(Consts.MONO_INT32);
         heapAddress = newMono.heapAddress();
         console.log("heap address of: [ ", newMono.beginFrom, " - ", newMono.endAt, " ]: ", heapAddress);
         fetchedMono = heap.fetchMono(heapAddress);
@@ -882,5 +515,6 @@ function example() {
 //testArray();
 
 module.exports = {
+    Consts,
     Heap
 };
