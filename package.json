@@ -4,7 +4,8 @@
   "description": "Implement some mechanisms of JS engine (stack machine, garbage collector, JIT)",
   "main": "test-file.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test-basic": "FILE=test-basic node main",
+    "test-array": "FILE=test-array node main"
   },
   "repository": {
     "type": "git",

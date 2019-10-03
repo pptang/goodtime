@@ -1,5 +1,6 @@
 const acorn = require('acorn');
 
+const jsApi = require('./jsapi');
 // It may seem strange to do this mapping (I meant: from JS -> AST, but map AST operator back to execute in JS).
 // The weirdness results from using JS as runtime for our own convenience,
 // but imagine if we use some low level language runtime, this piece of code will be modified to map to its instruction set.
@@ -43,7 +44,8 @@ const getVariableValueFromScopeChain = (variableName, currentVariableMap) => {
 // For V8 engine, it'll first compile the AST to Bytecode and interprete after,
 // while our experiment will interprete AST directly.
 class Interpreter {
-  constructor(javascriptStr) {
+  constructor(heap, javascriptStr) {
+    this.heap = heap;
     this.ast = acorn.parse(javascriptStr);
     // Simulate lexical environment for scope chain and the global environment is the outmost one.
     this.globalVariableMap = new Map([['outer', null]]);
@@ -105,27 +107,14 @@ class Interpreter {
           );
         case 'ArrayExpression':
           console.log('Current Array:', node.elements, '\n');
-          // TODO: Find a better to handle array expression;
-          break;
-        // case 'MemberExpression':
-        // Question: How to pass ArrowFunction AST descriptor to host machine array.map? (how to execute the statement inside?)
-        // if (node.object.type === 'ArrayExpression') {
-        //   throw Error('Array is not supported yet.');
-        // const objField = Array.from(node.object.elements)[propertyName];
-        // console.log('objField', objField);
-        // console.log('args:', callExpressionArgs);
-        // return typeof objField === 'function'
-        //   ? objField(i => i + 1)
-        //   : objField;
-        // } else {
-        //   const objName = handleExpression(node.object);
-        //   console.log(`Object '${objName}'`);
-        //   const propertyName = handleExpression(node.property);
-        //   const objField = global[objName][propertyName];
-        //   return typeof objField === 'function'
-        //     ? objField(handleExpression(callExpressionArgs))
-        //     : objField;
-        // }
+          const wrappedArray = jsApi.NewArray(this.heap);
+          for (let i = 0; i < node.elements.length; i++) {
+            const currentValue = handleExpression(node.elements[i]);
+            // TODO: currently we assume it's an array of integer,which should be modified.
+            const newInt32 = jsApi.NewInt32(this.heap, currentValue);
+            wrappedArray.append(newInt32);
+          }
+          return wrappedArray;
       }
     };
 
@@ -135,8 +124,35 @@ class Interpreter {
       switch (callee.type) {
         case 'MemberExpression':
           const objName = handleExpression(callee.object);
-          console.log(`Object '${objName}'`);
+          console.log('Object:', objName);
           const propertyName = handleExpression(callee.property);
+
+          // XXX: Whole 'if' block is too specific, might need to be refactored
+          if (objName.constructor.name === 'WrappedArray') {
+            switch (propertyName) {
+              case 'map':
+                // We assume our map function can only take a ArrowFunctionExpression, and the body should only contain expression as well.
+                if (!callArgs[0]) {
+                  throw Error(`Expect 1 argument for map function but got 0!`);
+                }
+                // XXX: Don't know how to handle this correctly and generally so far, so I just assume we only have BinaryExpression.
+                const arrLength = jsApi.ArrayLength(objName);
+                const newWrappedArray = jsApi.NewArray(this.heap);
+                const newInt32 = jsApi.NewInt32(this.heap, 1);
+                for (let i = 0; i < arrLength; i++) {
+                  const currentElement = jsApi.ArrayIndex(objName, i);
+
+                  // jsApi.ArrayPush(newWrappedArray, currentElement + newInt32);
+                }
+                // TODO: How can we read host values of wrapped array?
+                return [2, 3, 4, 5, 6];
+              default:
+                throw Error(
+                  `Missing implementation for ${propertyName} function of WrappedArray`,
+                );
+            }
+          }
+
           const objField = global[objName][propertyName];
           return typeof objField === 'function'
             ? objField(...callArgs.map(handleExpression))
