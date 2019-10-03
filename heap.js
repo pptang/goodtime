@@ -34,14 +34,16 @@ function Heap() {
     this.gc = new GC(this);
 }
 
-Heap.prototype.createRegion = function() {
+// `contentOffset`: optional: local content offset bytes from 0.
+// Like, `createRegion(5)` will start the region from `content[5]`
+Heap.prototype.createRegion = function(contentOffset = 0) {
     if (this.__contentCounter >= this.__rootedContents.length) {
         throw new Error("OOM: cannot create region anymore.");
     }
     const content = this.__rootedContents[this.__contentCounter];
-    const beginFrom = this.__contentCounter * Consts.REGION_SIZE;
+    const beginFrom = (this.__contentCounter * Consts.REGION_SIZE) + contentOffset;
     this.__contentCounter += 1;
-    return new Region(this, beginFrom, Consts.REGION_SIZE, content);
+    return new Region(this, beginFrom, Consts.REGION_SIZE - contentOffset, content);
 }
 
 Heap.prototype.fetchMono = function(address) {
@@ -274,13 +276,37 @@ Region.prototype.capable = function(n = 1) {
     return true;
 }
 
-Region.prototype.createMono = function(kind) {
+// Copy monos to a new region content (maybe or maybe not empty) withou region header.
+// content offset = begin from (in target content, start from [contentOffset])
+Region.prototype.contentToContent = function(targetContent, contentOffset = 0) {
+    if (contentOffset + this.counter > Consts.REGION_SIZE) {
+        console.log("Offset out of range: ", contentOffset, '+' , this.counter, Consts.REGION_SIZE);
+        return false;
+    }
+    for (let i = 0; i < this.counter; i++) {
+        targetContent[contentOffset + i] = this.content[i + Consts.REGION_HEAD_SIZE];
+    }
+    return targetContent;
+}
+
+// `beginFrom` is optional local address.
+// If it is specified, this function will directly allocate the new
+// Mono from that local address.
+Region.prototype.createMono = function(kind, beginFrom) {
     const increase = Mono.prototype.sizeFromKind(kind);
     if (!this.capable(increase)) {
         console.log("Region OOM for bytes: ", increase);
         return false;
     }
-    const mono = new Mono(this, kind, this.counter);
+    if (!beginFrom) {
+        beginFrom = this.counter;
+    }
+    if (beginFrom < 0 && beginFrom >= Consts.REGION_SIZE) {
+        console.log("Assigned beginFrom out of range: ", beginFrom);
+        return false; 
+    }
+
+    const mono = new Mono(this, kind, beginFrom);
     mono.writeHeader();
     this.counter += increase;
     this.writeCounter();
@@ -354,6 +380,12 @@ Mono.prototype.heapAddress = function() {
     const regionOffset = this.beginFrom;
     const heapIndex = this.region.beginFrom;
     return heapIndex + regionOffset;
+}
+
+Mono.prototype.cloneTo = function(newMono) {
+    for (let i = this.beginFrom; i < this.endAt; i ++) {
+        newMono.region.writeUint8(this.region.readUint8(i));
+    }
 }
 
 function Allocator(heap, defaultRegion) {
@@ -511,7 +543,7 @@ function example() {
     // ----
 }
 
-//testArray();
+testArray();
 
 module.exports = {
     Consts,

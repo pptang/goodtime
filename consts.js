@@ -7,6 +7,7 @@ Consts.REGION_EDEN = 11
 Consts.REGION_SURVIVOR = 12;
 Consts.REGION_TENURED = 13;
 Consts.REGION_HUMOGOUS = 14;
+Consts.REGION_HEAD_SIZE = 5;    // 1 kind + 4 counter.
 
 Consts.MONO_INT32 = 1;
 Consts.MONO_ADDRESS = 11; 

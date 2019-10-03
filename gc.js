@@ -47,111 +47,42 @@ GC.prototype.minorGC = function() {
     }
 }
 
-GC.prototype.mergeRegions = function(byKind, mergedNewBase, lessThan40, lessThan60) {
 
+GC.prototype.mergeRegions = function(byKind, mergedNewBase, lessThan40, lessThan60) {
     // 1. Give a new empty region.
     const newRegion = this.heap.createRegion();
-    // 2. Record these 2 regions merge to new region in mergedNewBase
-    //
-    // There is an offset:
-    // new region = [#0 .. #lessThan40.counter - 1, #lessThan40.counter = lessThan60[0] .. lessThan60[end of region] ]
+    
+    // 2. Give a region represent the later part of a content.
+    // Ex: counter = 42; [0 - 41] stored; [42 - ] is the new start of this region.
+
+    // First, clone all the monos to new content , with local offset.
+    lessThan40.contentToContent(newRegion.content, Consts.REGION_HEAD_SIZE);
+    lessThan60.contentToContent(newRegion.content, Consts.REGION_HEAD_SIZE + lessThan40.counter);
+
+    // Second, rewrite all heap addresses in the new region Monos.
     mergedNewBase[lessThan40.beginFrom] = newRegion.beginFrom;
     mergedNewBase[lessThan60.beginFrom] = newRegion.beginFrom + lessThan40.counter;
 
-    // 3. Copy Monos in lessThan40 one by one,
-    //    and rewrite all heapAddress if it holds any pointer.
+    // For example, addresses = # 5 , #1001:
+    // #[0 - 4] is 5 bytes of region header on region start from # 0
+    // #[5]     is 1 byte  of the Mono header
+    // #[1001]  is 1 byte  of the Mono header on the lessThan60 (assume it is 500 max)
     //
-    // How to change the pointee address:
+    // Now the region is moved to # 101 - # 602:
+    // #[101 - 105] is 5 bytes of new region header, new base = #101
+    // #[106]       is 1 byte  of the Mono header
+    // #[1602]      is 1 byte  of the Mono header on the lessThan60,
+    //              now with new base + offset by the counter (1001 + 101 + 500)
     //
-    // 1. Encounter a pointer, get the heap address
-    // 2. From the heap address, get the region
-    // 3. From mergedNewBase, check if the pointee is merged by this GC
-    // 4. If so, generate a new heap address with the new region
-    // 5. Overwrite the old address with newly generated one
-    const mergeCallback = (mono) => {
-        let pointeeRegion,
-            pointeeOffset,
-            pointeeHeapAddress,
-            wrapped,
-            newMono,
-            newWrapped,
-            newPointeeBase,
-            newPointeeHeapAddress;
 
-        switch(mono.kind) {
-            case Consts.MONO_ADDRESS:
-                wrapped = new WrappedAddress(mono);
-                pointeeHeapAddress = wrapped.read();
-                pointeeRegion = this.heap.fetchRegion(pointeeHeapAddress);
+    // TODO:
+    // So: traverse all Monos in newRegion,
+    // Check its type, and check all addresses inside,
+    // Pick new base on which region the address belongs to TODO: check git commit remotely of how,
+    // Make the heap address add new base = new heap address
+    // Write it back to the Mono as one element #
 
-                // Old:
-                // [#3 , [#7 , #8 , #9 ]] -> 7 - 3 = 4, to new:
-                // [#11, [#15, #16, #17]] -> 11 + 4 = 15
-                pointeeOffset = pointeeHeapAddress - pointeeRegion.beginFrom;
-
-                if (mergedNewBase[pointeeRegion.beginFrom]) {
-                    newPointeeBase = mergedNewBase[pointeeRegion.beginFrom];
-                    newPointeeHeapAddress = newPointeeBase + pointeeOffset
-                }
-
-                // Okay we now create new mono on merged new region.
-                newMono = newRegion.createMono(mono.kind);
-                // Then copy what the original mono has with new heap address.
-                newWrapped = new WrappedAddress(mono);
-
-                // *if* need and already there is a new pointee heap address
-                // on the newly merged region.
-                //
-                // Otherwise, just copy the old heap address to newly mono on the newly merged region. 
-                newWrapped.write(newHeapAddress || wrapped.read());
-                    
-                break;
-            case Consts.MONO_ARRAY_S8:
-                wrapped = new WrappedArray(mono);
-                newMono = newRegion.createMono(mono.kind);
-                newWrapped = new WrappedArray(newMono)
-            case Consts.MONO_CHUNK_S8:
-                wrapped = wrapped || new WrappedChunk(mono);
-                newMono = newMono || newRegion.createMono(mono.kind);
-                newWrapped = newWrapped || new WrappedChunk(newMono)
-
-                wrapped.traverseChunkAddresses((idx, pointeeHeapAddress) => {
-                    pointeeRegion = this.heap.fetchRegion(pointeeHeapAddress);
-                    pointeeOffset = pointeeHeapAddress - pointeeRegion.beginFrom;
-                    if (mergedNewBase[pointeeRegion.beginFrom]) {
-                        newPointeeBase = mergedNewBase[pointeeRegion.beginFrom];
-                        newPointeeHeapAddress = newPointeeBase + pointeeOffset;
-                    }
-                    // *if* need and already there is a new pointee heap address
-                    // on the newly merged region.
-                    //
-                    // Otherwise, just copy the old heap address to newly mono on the newly merged region. 
-                    newWrapped.chunkAppendAddress(newPointeeHeapAddress || pointeeHeapAddress);
-                    console.log("...debug for read back merged heap address: #",
-                        idx, pointeeHeapAddress, ' to: ', newPointeeHeapAddress , ' with ' ,  newWrapped.chunkIndex(idx).dispatch().read()
-                    );
-                });
-                break;
-
-            case Consts.MONO_INT32:
-                wrapped = new WrappedInt32(mono);
-                newMono = newRegion.createMono(mono.kind);
-                newWrapped = new WrappedInt32(newMono);
-            case Consts.MONO_FLOAT64:
-                wrapped = new WrappedFloat64(mono);
-                newMono = newRegion.createMono(mono.kind);
-                newWrapped = new WrappedFloat64(newMono);
-
-                newWrapped.write(wrapped.read());
-                break;
-            default:
-                return;
-                // Ignore unknown parts.
-        }
-    }
-
-    lessThan40.traverse(mergeCallback);
-    lessThan60.traverse(mergeCallback);
+    // Second, rewrite all pointeee address of cloned mono content
     return newRegion;
 }
 
