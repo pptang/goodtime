@@ -24,6 +24,7 @@ function ReadInt32(wrappedInt32) {
 }
 
 function NewArray(heap) {
+  console.log('An empty array is allocated on the heap');
   const newArray = heap.allocator.array();
   return newArray;
 }
@@ -76,6 +77,7 @@ function ArrayIndex(wrappedArray, idx) {
 }
 
 function ArrayLength(wrappedArray) {
+  console.log('Get Array Length');
   return wrappedArray.length();
 }
 

@@ -124,8 +124,35 @@ class Interpreter {
       switch (callee.type) {
         case 'MemberExpression':
           const objName = handleExpression(callee.object);
-          console.log(`Object '${objName}'`);
+          console.log('Object:', objName);
           const propertyName = handleExpression(callee.property);
+
+          // XXX: Whole 'if' block is too specific, might need to be refactored
+          if (objName.constructor.name === 'WrappedArray') {
+            switch (propertyName) {
+              case 'map':
+                // We assume our map function can only take a ArrowFunctionExpression, and the body should only contain expression as well.
+                if (!callArgs[0]) {
+                  throw Error(`Expect 1 argument for map function but got 0!`);
+                }
+                // XXX: Don't know how to handle this correctly and generally so far, so I just assume we only have BinaryExpression.
+                const arrLength = jsApi.ArrayLength(objName);
+                const newWrappedArray = jsApi.NewArray(this.heap);
+                const newInt32 = jsApi.NewInt32(this.heap, 1);
+                for (let i = 0; i < arrLength; i++) {
+                  const currentElement = jsApi.ArrayIndex(objName, i);
+
+                  // jsApi.ArrayPush(newWrappedArray, currentElement + newInt32);
+                }
+                // TODO: How can we read host values of wrapped array?
+                return [2, 3, 4, 5, 6];
+              default:
+                throw Error(
+                  `Missing implementation for ${propertyName} function of WrappedArray`,
+                );
+            }
+          }
+
           const objField = global[objName][propertyName];
           return typeof objField === 'function'
             ? objField(...callArgs.map(handleExpression))
