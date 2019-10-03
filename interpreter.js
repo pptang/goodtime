@@ -107,27 +107,14 @@ class Interpreter {
           );
         case 'ArrayExpression':
           console.log('Current Array:', node.elements, '\n');
-          // TODO: Find a better to handle array expression;
-          break;
-        // case 'MemberExpression':
-        // Question: How to pass ArrowFunction AST descriptor to host machine array.map? (how to execute the statement inside?)
-        // if (node.object.type === 'ArrayExpression') {
-        //   throw Error('Array is not supported yet.');
-        // const objField = Array.from(node.object.elements)[propertyName];
-        // console.log('objField', objField);
-        // console.log('args:', callExpressionArgs);
-        // return typeof objField === 'function'
-        //   ? objField(i => i + 1)
-        //   : objField;
-        // } else {
-        //   const objName = handleExpression(node.object);
-        //   console.log(`Object '${objName}'`);
-        //   const propertyName = handleExpression(node.property);
-        //   const objField = global[objName][propertyName];
-        //   return typeof objField === 'function'
-        //     ? objField(handleExpression(callExpressionArgs))
-        //     : objField;
-        // }
+          const wrappedArray = jsApi.NewArray(this.heap);
+          for (let i = 0; i < node.elements.length; i++) {
+            const currentValue = handleExpression(node.elements[i]);
+            // TODO: currently we assume it's an array of integer,which should be modified.
+            const newInt32 = jsApi.NewInt32(this.heap, currentValue);
+            wrappedArray.append(newInt32);
+          }
+          return wrappedArray;
       }
     };
 
