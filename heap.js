@@ -130,7 +130,7 @@ function Region(heap, beginFrom, size, content) {
     this.content = content;
     // Read how many Slot/byte (Uint8) has been used.
     // at any time content[counter] = the last byte has NOT been occupied.
-    this.counter = 0;
+    this.counter = 5;   // Counter will included the region kind and counter itself (so 5 at the beginning)
     this.kind = 0;
     this.readKind();
     this.readCounter(); 
@@ -301,7 +301,7 @@ Region.prototype.writeKind = function(kind) {
 Region.prototype.readCounter = function() {
     let counter = this.readUint32(0);
     if (0 === counter) { // new region
-        this.counter = 5;   // counter + kind
+        this.counter = 5;   // kind + counter itself
         this.writeCounter();
     } else {
         this.counter = counter;
@@ -319,14 +319,17 @@ Region.prototype.capable = function(n = 1) {
     return true;
 }
 
-// Copy monos to a new region content (maybe or maybe not empty) withou region header.
-// content offset = begin from (in target content, start from [contentOffset])
+// Copy monos to a new region content (maybe or maybe not empty) without copying region header.
+// content offset = begin from at new content (in target content, start from [contentOffset])
 Region.prototype.contentCloneTo = function(targetContent, contentOffset = 0) {
+        console.log('---- content offset of cloning content : ', contentOffset);
     if (contentOffset + this.counter > Consts.REGION_SIZE) {
-        console.log("Offset out of range: ", contentOffset, '+' , this.counter, Consts.REGION_SIZE);
+            console.log("---- Offset out of range: ", contentOffset, '+' , this.counter, Consts.REGION_SIZE);
         return false;
     }
-    for (let i = 0; i < this.counter; i++) {
+    // How many bytes; counts no Region header.
+    for (let i = 0; i < this.counter - Consts.REGION_HEAD_SIZE; i++) {
+            console.log("---- write to: ", contentOffset + i, targetContent[contentOffset + i], this.content[i + Consts.REGION_HEAD_SIZE]);
         targetContent[contentOffset + i] = this.content[i + Consts.REGION_HEAD_SIZE];
     }
     return targetContent;
@@ -360,13 +363,17 @@ Region.prototype.createMono = function(kind, beginFrom) {
 Region.prototype.traverse = function(cb) {
     for(let beginFrom = 5; beginFrom < this.counter;) {    // [0 - 3] is the counter [4] is kind.
         kind = this.readUint8(beginFrom);
-        if (0 === kind) {
-            // End of monos.
-            break;
+        if (kind === 0) {
+            for (let testi = beginFrom; testi < this.counter; testi ++) {
+                console.log(this.readUint8(testi));
+            }
         }
+
         mono = new Mono(this, kind, beginFrom);
+        console.log(">>>>> kind", kind);
         cb(mono);
         beginFrom = mono.endAt + 1;
+        console.log(">>>> traverse counter next beginFrom: ", beginFrom, " of ", this.counter);
     }
 }
 
@@ -586,7 +593,7 @@ function example() {
     // ----
 }
 
-testArray();
+//testArray();
 
 module.exports = {
     Consts,

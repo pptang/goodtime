@@ -60,7 +60,8 @@ GC.prototype.minorGC = function() {
 // We rewrite addresses only after we clone Monos.
 // Therefore all pointee address should be valid to de-reference
 GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
-    let pointeeRegionBase
+    console.log('>>> >>>> start rewrite address');
+    let pointeeRegionBase,
         pointeeRegion,
         pointeeOffset,
         pointeeHeapAddress,
@@ -72,10 +73,9 @@ GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
         case Consts.MONO_ADDRESS:
             wrapped = new WrappedAddress(mono);
             pointeeHeapAddress = newRegion.heap.heapAddress(wrapped.read());
-            pointeeRegionBase =
-                newRegion.heap.getRegionIndex(pointeeHeapAddress) * Consts.REGION_SIZE; 
+            pointeeRegionBase = pointeeHeapAddress.regionBase();
 
-            if (! newBases[pointeeRegionBase]) {
+            if (!newBases[pointeeRegionBase]) {
                 return false;   // Don't know how to rewrite it from GC (not touched)
             }
 
@@ -88,19 +88,25 @@ GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
         case Consts.MONO_CHUNK_S8:
             wrapped = wrapped || new WrappedChunk(mono);
 
-            wrapped.traverseChunkAddresses((idx, pointeeHeapAddress) => {
+            wrapped.traverseChunkAddresses((idx, pointeeHeapRawAddress) => {
+                pointeeHeapAddress = newRegion.heap.heapAddress(pointeeHeapRawAddress);
+                console.log('>>>> before relocation: ', pointeeHeapAddress.address);
+                pointeeRegionBase = pointeeHeapAddress.regionBase();
+
                 newPointeeBase = newBases[pointeeRegionBase];
                 if (!newPointeeBase) {
                     return false;
                 }
                 newPointeeHeapAddress = pointeeHeapAddress.relocate(newPointeeBase);
-                wrapped.chunkUpdateAddress(idx, newPointeeHeapAddress);
+                console.log('>>>> relocated: ', newPointeeBase, ' |- ' , newPointeeHeapAddress.address);
+                wrapped.chunkUpdateAddress(idx, newPointeeHeapAddress.address);
             });
             break;
 
         case Consts.MONO_INT32:
         case Consts.MONO_FLOAT64:
         default:
+            console.log('>>>> >>>> nothing to do', mono.kind);
             return;
             // Ignore unknown and no need to relocate parts.
     }
@@ -120,7 +126,9 @@ GC.prototype.readdressRegion = function(newBases, newRegion) {
     // #[1602]      is 1 byte  of the Mono header on the lessThan60,
     //              now with new base + offset by the counter (1001 + 101 + 500)
     //
-    newRegion.traverse(this.rewriteAddress.bind(this, newBases, newRegion));
+    newRegion.traverse((mono) => {
+        this.rewriteAddress(mono, newBases, newRegion);
+    });
 
     // TODO:
     // So: traverse all Monos in newRegion,
@@ -139,8 +147,13 @@ GC.prototype.mergeRegions = function(mergedNewBase, lessThan40, lessThan60) {
     // Ex: counter = 42; [0 - 41] stored; [42 - ] is the new start of this region.
 
     // First, clone all the monos to new content , with local offset.
+    console.log('>>>>> clone the first', Consts.REGION_HEAD_SIZE, lessThan40.counter); /// counter: + header
     lessThan40.contentCloneTo(newRegion.content, Consts.REGION_HEAD_SIZE);
-    lessThan60.contentCloneTo(newRegion.content, Consts.REGION_HEAD_SIZE + lessThan40.counter);
+    console.log('>>>>>> clone the second: ', Consts.REGION_HEAD_SIZE, lessThan40.counter, lessThan60.counter);
+    lessThan60.contentCloneTo(newRegion.content, lessThan40.counter);   // header of new region 5 bytes included in the counter
+
+    newRegion.counter = lessThan40.counter + lessThan60.counter - Consts.REGION_HEAD_SIZE;
+    newRegion.writeCounter();
 
     // Second, rewrite all heap addresses in the new region Monos.
     mergedNewBase[lessThan40.beginFrom] = newRegion.beginFrom;
