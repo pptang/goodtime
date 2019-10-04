@@ -139,9 +139,16 @@ class Interpreter {
                 const arrLength = jsApi.ArrayLength(objName);
                 const newWrappedArray = jsApi.NewArray(this.heap);
                 const newInt32 = jsApi.NewInt32(this.heap, 1);
+                // TODO: Instead of doing calculation for wrapped array (values),
+                // do it with host values first, and write back to the heap.
                 for (let i = 0; i < arrLength; i++) {
                   const currentElement = jsApi.ArrayIndex(objName, i);
-
+                  // Type: Node
+                  const arrowFunctionExpression = callArgs[0];
+                  // this.executeArrowExpression(
+                  //   arrowFunctionExpression,
+                  //   currentElement,
+                  // );
                   // jsApi.ArrayPush(newWrappedArray, currentElement + newInt32);
                 }
                 // TODO: How can we read host values of wrapped array?
@@ -164,6 +171,10 @@ class Interpreter {
             localVariableMap,
           );
       }
+    };
+
+    const executeArrowExpression = (arrowFunctionExpressionNode, ...args) => {
+      return executeProgram(arrowFunctionExpressionNode.body, args);
     };
 
     // Execute all statements in the same lexical scope
