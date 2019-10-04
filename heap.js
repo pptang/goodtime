@@ -62,13 +62,12 @@ function Heap() {
 
     // We need this 'root' to prevent an unreferenced typed array gone.
     // This is because we don't control the real memory.
+    this.__freeContentIndexes = [];
     this.__rootedContents = [ new Uint8Array(Consts.REGION_SIZE) ];
     for (let i = 0; i < Consts.NUMBER_REGIONS; i ++) {
         this.__rootedContents.push(new Uint8Array(Consts.REGION_SIZE));
+        this.__freeContentIndexes[i] = i;
     }
-    this.__contentCounter = 0;      // TODO: Need to change a table for empty or occupied,
-                                    // or GC cannot re-use old spaces like counter = 10 but
-                                    // it freeded #1. 
     this.allocator = new Allocator(this, this.createRegion());
 
     // TODO: Can do some fun subsitutation by config if we have GC factory.
@@ -78,12 +77,12 @@ function Heap() {
 // `contentOffset`: optional: local content offset bytes from 0.
 // Like, `createRegion(5)` will start the region from `content[5]`
 Heap.prototype.createRegion = function(contentOffset = 0) {
-    if (this.__contentCounter >= this.__rootedContents.length) {
+    if (0 === this.__freeContentIndexes.length) {
         throw new Error("OOM: cannot create region anymore.");
     }
-    const content = this.__rootedContents[this.__contentCounter];
-    const beginFrom = (this.__contentCounter * Consts.REGION_SIZE) + contentOffset;
-    this.__contentCounter += 1;
+    const freeRegionIndex = this.__freeContentIndexes.pop();
+    const content = this.__rootedContents[freeRegionIndex];
+    const beginFrom = (freeRegionIndex * Consts.REGION_SIZE) + contentOffset;
     return new Region(this, beginFrom, Consts.REGION_SIZE - contentOffset, content);
 }
 
@@ -106,8 +105,6 @@ Heap.prototype.fetchMono = function(address) {
 Heap.prototype.fetchRegion = function(address) {
     const regionIndex = (new HeapAddress(address)).regionIndex();
     const content = this.__rootedContents[regionIndex];
-    const contentIndex = address % Consts.REGION_SIZE;     // index inside the region.
-
     const beginFrom = regionIndex * Consts.REGION_SIZE;
     const region = new Region(this, beginFrom, Consts.REGION_SIZE, content);
     return region;
@@ -123,6 +120,7 @@ Heap.prototype.reclaimRegion = function(region) {
     for (let i = 0; i < Consts.REGION_SIZE; i ++) {
         content[i] = 0;
     }
+    this.__freeContentIndexes.push(regionIndex);
 }
 
 
@@ -596,7 +594,7 @@ function example() {
     // ----
 }
 
-//testArray();
+testArray();
 
 module.exports = {
     Consts,
