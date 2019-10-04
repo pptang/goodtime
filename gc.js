@@ -50,6 +50,8 @@ GC.prototype.minorGC = function() {
         newRegions.push(this.mergeRegions(
             newBases, regionLessThan40, regionLessThan60
         ));
+        this.heap.reclaimRegion(regionLessThan40);
+        this.heap.reclaimRegion(regionLessThan60);
     }
 
     for (newRegion of newRegions) {
@@ -148,8 +150,6 @@ GC.prototype.mergeRegions = function(mergedNewBase, lessThan40, lessThan60) {
     mergedNewBase[lessThan60.beginFrom] = newRegion.beginFrom + lessThan40.counter;
     return newRegion;
 }
-
-
 
 // A lazy way to maintain usages.
 GC.prototype.updateUsage = function(byKind, region) {

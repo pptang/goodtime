@@ -117,6 +117,14 @@ Heap.prototype.heapAddress = function(uint32address) {
     return new HeapAddress(this, uint32address)
 }
 
+Heap.prototype.reclaimRegion = function(region) {
+    const regionIndex = (region.beginFrom / Consts.REGION_SIZE >>0);
+    const content = this.__rootedContents[regionIndex];
+    for (let i = 0; i < Consts.REGION_SIZE; i ++) {
+        content[i] = 0;
+    }
+}
+
 
 // Regions are now fixed as 1MB by a const.
 // Each region contains Uint8Array with length 
