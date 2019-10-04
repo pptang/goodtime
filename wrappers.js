@@ -142,12 +142,10 @@ WrappedChunk.prototype.chunkIndex = function(idxChunk) {
 
 // Read all addresses in one chunk.
 WrappedChunk.prototype.traverseChunkAddresses = function(icb) {
-    console.log('>>>> >>>> readChunkLength: ', this.readChunkLength());
     for (let i = 0, localAddress;
          i < this.readChunkLength(); i ++)
     {
         localAddress = this.addressFromIndex(i);
-    console.log('>>>>> traverseChunkAddresses', i, localAddress);
         icb(i, this.mono.region.readAddress(localAddress));
     } 
 }

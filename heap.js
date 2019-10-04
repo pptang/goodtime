@@ -322,14 +322,11 @@ Region.prototype.capable = function(n = 1) {
 // Copy monos to a new region content (maybe or maybe not empty) without copying region header.
 // content offset = begin from at new content (in target content, start from [contentOffset])
 Region.prototype.contentCloneTo = function(targetContent, contentOffset = 0) {
-        console.log('---- content offset of cloning content : ', contentOffset);
     if (contentOffset + this.counter > Consts.REGION_SIZE) {
-            console.log("---- Offset out of range: ", contentOffset, '+' , this.counter, Consts.REGION_SIZE);
         return false;
     }
     // How many bytes; counts no Region header.
     for (let i = 0; i < this.counter - Consts.REGION_HEAD_SIZE; i++) {
-            console.log("---- write to: ", contentOffset + i, targetContent[contentOffset + i], this.content[i + Consts.REGION_HEAD_SIZE]);
         targetContent[contentOffset + i] = this.content[i + Consts.REGION_HEAD_SIZE];
     }
     return targetContent;
@@ -370,10 +367,8 @@ Region.prototype.traverse = function(cb) {
         }
 
         mono = new Mono(this, kind, beginFrom);
-        console.log(">>>>> kind", kind);
         cb(mono);
         beginFrom = mono.endAt + 1;
-        console.log(">>>> traverse counter next beginFrom: ", beginFrom, " of ", this.counter);
     }
 }
 

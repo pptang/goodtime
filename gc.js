@@ -60,7 +60,6 @@ GC.prototype.minorGC = function() {
 // We rewrite addresses only after we clone Monos.
 // Therefore all pointee address should be valid to de-reference
 GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
-    console.log('>>> >>>> start rewrite address');
     let pointeeRegionBase,
         pointeeRegion,
         pointeeOffset,
@@ -90,7 +89,6 @@ GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
 
             wrapped.traverseChunkAddresses((idx, pointeeHeapRawAddress) => {
                 pointeeHeapAddress = newRegion.heap.heapAddress(pointeeHeapRawAddress);
-                console.log('>>>> before relocation: ', pointeeHeapAddress.address);
                 pointeeRegionBase = pointeeHeapAddress.regionBase();
 
                 newPointeeBase = newBases[pointeeRegionBase];
@@ -98,7 +96,6 @@ GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
                     return false;
                 }
                 newPointeeHeapAddress = pointeeHeapAddress.relocate(newPointeeBase);
-                console.log('>>>> relocated: ', newPointeeBase, ' |- ' , newPointeeHeapAddress.address);
                 wrapped.chunkUpdateAddress(idx, newPointeeHeapAddress.address);
             });
             break;
@@ -106,37 +103,29 @@ GC.prototype.rewriteAddress = function(mono, newBases, newRegion) {
         case Consts.MONO_INT32:
         case Consts.MONO_FLOAT64:
         default:
-            console.log('>>>> >>>> nothing to do', mono.kind);
             return;
             // Ignore unknown and no need to relocate parts.
     }
 }
 
 
+// For example, 2 old pointers have addresses = # 5 and #1001:
+// #[0 - 4] is 5 bytes of region header on region start from # 0
+//
+// #[5]     is 1 byte  of the Mono header
+// #[1001]  is 1 byte  of the Mono header on the lessThan60 (assume it is 500 max)
+//
+// Now the whole region is moved to # 101 - # 602. The 2 pointers will be re-written as:
+// #[101 - 105] is 5 bytes of new region header, new base = #101
+// 
+// #[106]       is 1 byte  of the new Mono header from #[5]
+// #[1602]      is 1 byte  of the new Mono header on the lessThan60,
+//              now with new base + offset by the counter (1001 + 101 + 500)
+//
 GC.prototype.readdressRegion = function(newBases, newRegion) {
-
-    // For example, addresses = # 5 , #1001:
-    // #[0 - 4] is 5 bytes of region header on region start from # 0
-    // #[5]     is 1 byte  of the Mono header
-    // #[1001]  is 1 byte  of the Mono header on the lessThan60 (assume it is 500 max)
-    //
-    // Now the region is moved to # 101 - # 602:
-    // #[101 - 105] is 5 bytes of new region header, new base = #101
-    // #[106]       is 1 byte  of the Mono header
-    // #[1602]      is 1 byte  of the Mono header on the lessThan60,
-    //              now with new base + offset by the counter (1001 + 101 + 500)
-    //
     newRegion.traverse((mono) => {
         this.rewriteAddress(mono, newBases, newRegion);
     });
-
-    // TODO:
-    // So: traverse all Monos in newRegion,
-    // Check its type, and check all addresses inside,
-    // Pick new base on which region the address belongs to TODO: check git commit remotely of how,
-    // Make the heap address add new base = new heap address
-    // Write it back to the Mono as one element #
-
 }
 
 GC.prototype.mergeRegions = function(mergedNewBase, lessThan40, lessThan60) {
@@ -147,10 +136,9 @@ GC.prototype.mergeRegions = function(mergedNewBase, lessThan40, lessThan60) {
     // Ex: counter = 42; [0 - 41] stored; [42 - ] is the new start of this region.
 
     // First, clone all the monos to new content , with local offset.
-    console.log('>>>>> clone the first', Consts.REGION_HEAD_SIZE, lessThan40.counter); /// counter: + header
     lessThan40.contentCloneTo(newRegion.content, Consts.REGION_HEAD_SIZE);
-    console.log('>>>>>> clone the second: ', Consts.REGION_HEAD_SIZE, lessThan40.counter, lessThan60.counter);
-    lessThan60.contentCloneTo(newRegion.content, lessThan40.counter);   // header of new region 5 bytes included in the counter
+    // (NOTE: header of new region 5 bytes *is* included in the counter)
+    lessThan60.contentCloneTo(newRegion.content, lessThan40.counter);
 
     newRegion.counter = lessThan40.counter + lessThan60.counter - Consts.REGION_HEAD_SIZE;
     newRegion.writeCounter();
