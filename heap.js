@@ -19,6 +19,45 @@ const {
     WrappedObject
 } = require('./wrappers');
 
+function HeapAddress(heap, uint32Address) {
+    this.heap = heap;
+    this.address = uint32Address;
+}
+
+HeapAddress.prototype.regionIndex = function() {
+    const regionIndex = (this.address / Consts.REGION_SIZE >>0);
+    if (regionIndex > Consts.NUMBER_REGIONS) {
+        throw new Error("Address out of Region range: " + address);
+    }
+    return regionIndex; 
+}
+
+// base = heap address of where this region starts (first byte).
+HeapAddress.prototype.regionBase = function() {
+    return this.regionIndex() * Consts.REGION_SIZE;
+}
+
+// local offset of this address from region base.
+// regionBase: # 200
+// address: # 202
+// --> regionOffset = 2
+HeapAddress.prototype.regionOffset = function() {
+    return this.address - this.regionBase();
+}
+
+// Before relocate:
+// regionBase: # 200
+// address: # 202 --> regionOffset = 2
+//
+// After relocate to # 303
+// regionBase: # 303
+// address: # 303 + 2 --> regionOffset keeps 2
+HeapAddress.prototype.relocate = function(newBase) {
+    const localOffset = this.regionOffset();
+    return new HeapAddress(this, newBase + localOffset);
+}
+
+
 function Heap() {
 
     // We need this 'root' to prevent an unreferenced typed array gone.
@@ -27,7 +66,9 @@ function Heap() {
     for (let i = 0; i < Consts.NUMBER_REGIONS; i ++) {
         this.__rootedContents.push(new Uint8Array(Consts.REGION_SIZE));
     }
-    this.__contentCounter = 0;
+    this.__contentCounter = 0;      // TODO: Need to change a table for empty or occupied,
+                                    // or GC cannot re-use old spaces like counter = 10 but
+                                    // it freeded #1. 
     this.allocator = new Allocator(this, this.createRegion());
 
     // TODO: Can do some fun subsitutation by config if we have GC factory.
@@ -63,10 +104,7 @@ Heap.prototype.fetchMono = function(address) {
 }
 
 Heap.prototype.fetchRegion = function(address) {
-    const regionIndex = (address / Consts.REGION_SIZE >>0);
-    if (regionIndex > Consts.NUMBER_REGIONS) {
-        throw new Error("Address out of Region range: " + address);
-    }
+    const regionIndex = (new HeapAddress(address)).regionIndex();
     const content = this.__rootedContents[regionIndex];
     const contentIndex = address % Consts.REGION_SIZE;     // index inside the region.
 
@@ -74,6 +112,11 @@ Heap.prototype.fetchRegion = function(address) {
     const region = new Region(this, beginFrom, Consts.REGION_SIZE, content);
     return region;
 }
+
+Heap.prototype.heapAddress = function(uint32address) {
+    return new HeapAddress(this, uint32address)
+}
+
 
 // Regions are now fixed as 1MB by a const.
 // Each region contains Uint8Array with length 
@@ -278,7 +321,7 @@ Region.prototype.capable = function(n = 1) {
 
 // Copy monos to a new region content (maybe or maybe not empty) withou region header.
 // content offset = begin from (in target content, start from [contentOffset])
-Region.prototype.contentToContent = function(targetContent, contentOffset = 0) {
+Region.prototype.contentCloneTo = function(targetContent, contentOffset = 0) {
     if (contentOffset + this.counter > Consts.REGION_SIZE) {
         console.log("Offset out of range: ", contentOffset, '+' , this.counter, Consts.REGION_SIZE);
         return false;
@@ -547,5 +590,6 @@ testArray();
 
 module.exports = {
     Consts,
-    Heap
+    Heap,
+    HeapAddress
 };

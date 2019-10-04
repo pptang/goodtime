@@ -113,8 +113,20 @@ WrappedChunk.prototype.chunkAppendAddress = function(address) {
     this.mono.region.writeAddress(
         this.addressFromIndex(currentLength),
         address
-    )
+    );
     this.writeChunkLength(currentLength + 1);
+}
+
+WrappedChunk.prototype.chunkUpdateAddress = function(index, address) {
+    const currentLength = this.readChunkLength();
+    if (index < 0 || index >= currentLength) {
+        return false;
+    }
+
+    this.mono.region.writeAddress(
+        this.addressFromIndex(index),
+        address
+    );
 }
 
 WrappedChunk.prototype.chunkIndex = function(idxChunk) {
@@ -317,6 +329,10 @@ WrappedArray.prototype.chunkAppend = function(wrapped) {
 
 WrappedArray.prototype.chunkAppendAddress = function(address) {
     return WrappedChunk.prototype.chunkAppendAddress.apply(this, [address]);
+}
+
+WrappedArray.prototype.chunkUpdateAddress = function(index, address) {
+    return WrappedChunk.prototype.chunkUpdateAddress.apply(this, [index, address]);
 }
 
 WrappedArray.prototype.chunkToHost = function() {
