@@ -16,7 +16,7 @@ const REGION_TENURED = 13;
 const REGION_HUMOGOUS = 14;
 
 const MONO_INT32 = 1;
-const MONO_ADDRESS = 11; 
+const MONO_ADDRESS = 11;
 const MONO_FLOAT64 = 2;
 const MONO_ARRAY_S8 = 3;
 const MONO_CHUNK_S8 = 31;
@@ -28,24 +28,24 @@ const MONO_CHUNK_SIZE = 8;  // 8 elements per chunk.
 
 function Heap() {
 
-    // We need this 'root' to prevent an unreferenced typed array gone.
+    // We need this 'root' to prevent an unreferenced typed array gone by the host GC.
     // This is because we don't control the real memory.
-    this.__rootedContents = [ new Uint8Array(REGION_SIZE) ];
-    for (let i = 0; i < NUMBER_REGIONS; i ++) {
+    this.__rootedContents = [new Uint8Array(REGION_SIZE)];
+    for (let i = 0; i < NUMBER_REGIONS; i++) {
         this.__rootedContents.push(new Uint8Array(REGION_SIZE));
     }
     this.__contentCounter = 0;
     this.allocator = new Allocator(this, this.createRegion());
 }
 
-Heap.prototype.createRegion = function() {
+Heap.prototype.createRegion = function () {
     const content = this.__rootedContents[this.__contentCounter];
     const beginFrom = this.__contentCounter * REGION_SIZE;
     return new Region(this, beginFrom, REGION_SIZE, content);
 }
 
-Heap.prototype.fetchMono = function(address) {
-    const regionIndex = (address / REGION_SIZE >>0);
+Heap.prototype.fetchMono = function (address) {
+    const regionIndex = (address / REGION_SIZE >> 0);
     if (regionIndex > NUMBER_REGIONS) {
         throw new Error("Address out of Region range: " + address);
     }
@@ -66,7 +66,7 @@ Heap.prototype.fetchMono = function(address) {
 // (since we implement in JS runtime, they're stick to v8's native heap as object properties).
 function Region(heap, beginFrom, size, content) {
     this.heap = heap;
-    this.beginFrom = beginFrom;
+    this.beginFrom = beginFrom;  // heap address of beginning byte.
     this.size = size;
     this.endAt = beginFrom + size - 1;  // index
     this.content = content;
@@ -75,7 +75,7 @@ function Region(heap, beginFrom, size, content) {
     this.counter = 0;
     this.kind = 0;
     this.readKind();
-    this.readCounter(); 
+    this.readCounter();
 }
 
 // All these read/write functions' `at` is the address/index inside the region (from 0 to 1MB).
@@ -84,67 +84,67 @@ function Region(heap, beginFrom, size, content) {
 // And all these write is for host value,
 // while read is also to host value.
 
-Region.prototype.readUint8 = function(at) {
+Region.prototype.readUint8 = function (at) {
     if (at > this.size || at < 0) {
         throw new Error("Read from address out of range: " + at)
     }
     return this.content[at];
 }
 
-Region.prototype.readUint32 = function(at) {
+Region.prototype.readUint32 = function (at) {
     if (at + 4 > this.size || at < 0) {
         throw new Error("Read from address out of range: " + at)
     }
 
     const buf = new ArrayBuffer(4);
     const view = new DataView(buf);
-    for (let i = 0; i < 4; i ++ ) {
+    for (let i = 0; i < 4; i++) {
         view.setUint8(i, this.content[i + at])
     }
     const uint32 = view.getUint32(0);
     return uint32;
 }
 
-Region.prototype.readInt32 = function(at) {
+Region.prototype.readInt32 = function (at) {
     if (at + 4 > this.size || at < 0) {
         throw new Error("Read from address out of range: " + at)
     }
 
     const buf = new ArrayBuffer(4);
     const view = new DataView(buf);
-    for (let i = 0; i < 4; i ++ ) {
+    for (let i = 0; i < 4; i++) {
         view.setUint8(i, this.content[i + at])
     }
     const int32 = view.getInt32(0);
     return int32;
 }
 
-Region.prototype.readAddress = function(at) {
+Region.prototype.readAddress = function (at) {
     return this.readUint32(at);
 }
 
-Region.prototype.readFloat64 = function(at) {
+Region.prototype.readFloat64 = function (at) {
     if (at + 8 > this.size || at < 0) {
         throw new Error("Read from address out of range: " + at)
     }
 
     const buf = new ArrayBuffer(8);
     const view = new DataView(buf);
-    for (let i = 0; i < 8; i ++ ) {
+    for (let i = 0; i < 8; i++) {
         view.setUint8(i, this.content[i + at])
     }
     const float64 = view.getFloat64(0);
     return float64;
 }
 
-Region.prototype.writeUint8 = function(at, byte) {
+Region.prototype.writeUint8 = function (at, byte) {
     if (at + 1 > this.size || at < 0) {
         throw new Error("Write to address out of range: " + at)
     }
     this.content[at] = byte;
 }
 
-Region.prototype.writeUint32 = function(at, uint32) {
+Region.prototype.writeUint32 = function (at, uint32) {
     if (at + 4 > this.size || at < 0) {
         throw new Error("Write to address out of range: " + at)
     }
@@ -153,12 +153,12 @@ Region.prototype.writeUint32 = function(at, uint32) {
     const view = new DataView(buf);
     view.setUint32(0, uint32);
     const temp = new Uint8Array(buf);
-    for (let i = 0; i < 4; i ++ ) {
+    for (let i = 0; i < 4; i++) {
         this.content[at + i] = temp[i];
     }
 }
 
-Region.prototype.writeInt32 = function(at, int32) {
+Region.prototype.writeInt32 = function (at, int32) {
     if (at + 4 > this.size || at < 0) {
         throw new Error("Write to address out of range: " + at)
     }
@@ -167,16 +167,16 @@ Region.prototype.writeInt32 = function(at, int32) {
     const view = new DataView(buf);
     view.setInt32(0, int32);
     const temp = new Uint8Array(buf);
-    for (let i = 0; i < 4; i ++ ) {
+    for (let i = 0; i < 4; i++) {
         this.content[at + i] = temp[i];
     }
 }
 
-Region.prototype.writeAddress = function(at, address) {
+Region.prototype.writeAddress = function (at, address) {
     return this.writeUint32(at, address);
 }
 
-Region.prototype.writeFloat64 = function(at, float64) {
+Region.prototype.writeFloat64 = function (at, float64) {
     if (at + 8 > this.size || at < 0) {
         throw new Error("Write to address out of range: " + at)
     }
@@ -185,38 +185,38 @@ Region.prototype.writeFloat64 = function(at, float64) {
     const view = new DataView(buf);
     view.setFloat64(0, float64);
     const temp = new Uint8Array(buf);
-    for (let i = 0; i < 8; i ++ ) {
+    for (let i = 0; i < 8; i++) {
         this.content[at + i] = temp[i];
     }
 }
 
-Region.prototype.newUint8 = function(at, uint8) {
+Region.prototype.newUint8 = function (at, uint8) {
     this.writeUint8(at, uint8);
     this.counter += 1;
 }
 
-Region.prototype.newUint32 = function(at, uint32) {
+Region.prototype.newUint32 = function (at, uint32) {
     this.writeUint32(at, uint32);
     this.counter += 4;
 }
 
-Region.prototype.newInt32 = function(at, int32) {
+Region.prototype.newInt32 = function (at, int32) {
     this.writeInt32(at, int32);
     this.counter += 4;
 }
 
-Region.prototype.newAddress = function(at, address) {
+Region.prototype.newAddress = function (at, address) {
     this.writeAddress(at, address);
     this.counter += 4;
 }
 
-Region.prototype.newFloat64 = function(at, float64) {
+Region.prototype.newFloat64 = function (at, float64) {
     this.writeFloat64(at, float64);
     this.counter += 8;
 }
 
 // Read the #4 byte from beginning to get the region kind.
-Region.prototype.readKind = function() {
+Region.prototype.readKind = function () {
     const kind = this.readUint8(4);
     if (0 === kind) {   // new region; eden.
         this.kind = REGION_EDEN;
@@ -226,7 +226,7 @@ Region.prototype.readKind = function() {
     }
 }
 
-Region.prototype.writeKind = function(kind) {
+Region.prototype.writeKind = function (kind) {
     switch (kind) {
         case REGION_EDEN:
         case REGION_SURVIVOR:
@@ -240,7 +240,7 @@ Region.prototype.writeKind = function(kind) {
 }
 
 // Read the first 4 slots (32bit) to get the counter;
-Region.prototype.readCounter = function() {
+Region.prototype.readCounter = function () {
     let counter = this.readUint32(0);
     if (0 === counter) { // new region
         this.counter = 5;   // counter + kind
@@ -250,18 +250,18 @@ Region.prototype.readCounter = function() {
     }
 }
 
-Region.prototype.writeCounter = function() {
+Region.prototype.writeCounter = function () {
     this.writeUint32(0, this.counter);
 }
 
-Region.prototype.capable = function(n = 1) {
-    if (this.counter+n > this.size) {
+Region.prototype.capable = function (n = 1) {
+    if (this.counter + n > this.size) {
         return false;
     }
     return true;
 }
 
-Region.prototype.createMono = function(kind) {
+Region.prototype.createMono = function (kind) {
     const increase = Mono.prototype.sizeFromKind(kind);
     if (!this.capable(increase)) {
         console.log("Region OOM for bytes: ", increase);
@@ -274,8 +274,8 @@ Region.prototype.createMono = function(kind) {
 }
 
 // Traverse all monos. One by one call the callback
-Region.prototype.traverse = function(cb) {
-    for(let beginFrom = 5; beginFrom < this.counter;) {    // [0 - 3] is the counter [4] is kind.
+Region.prototype.traverse = function (cb) {
+    for (let beginFrom = 5; beginFrom < this.counter;) {    // [0 - 3] is the counter [4] is kind.
         console.log('try to traverse mono at: ', beginFrom)
         kind = this.readUint8(beginFrom);
         if (0 === kind) {
@@ -310,11 +310,11 @@ function Mono(region, kind, beginFrom) {
 
 // Write header information onto region content.
 // REMEMBER TO CALL THIS: for any newly created Mono!
-Mono.prototype.writeHeader = function() {
+Mono.prototype.writeHeader = function () {
     this.region.writeUint8(this.beginFrom, this.kind);
 }
 
-Mono.prototype.sizeFromKind = function(kind) {
+Mono.prototype.sizeFromKind = function (kind) {
     switch (kind) {
         case MONO_INT32:
         case MONO_ADDRESS:
@@ -337,7 +337,7 @@ Mono.prototype.sizeFromKind = function(kind) {
 }
 
 // Form the heap address of this mono's header.
-Mono.prototype.heapAddress = function() {
+Mono.prototype.heapAddress = function () {
     const regionOffset = this.beginFrom;
     const heapIndex = this.region.beginFrom;
     return heapIndex + regionOffset;
@@ -345,20 +345,20 @@ Mono.prototype.heapAddress = function() {
 
 function Allocator(heap, defaultRegion) {
     this.heap = heap;
-    this.regions = [ defaultRegion ];
+    this.regions = [defaultRegion];
 }
 
 // TODO: accept host array and fill it to wrapped one.
-Allocator.prototype.array = function() {
+Allocator.prototype.array = function () {
     const result = this.allocate(MONO_ARRAY_S8, WrappedArray);
     return result;
 }
 
-Allocator.prototype.chunk = function() {
+Allocator.prototype.chunk = function () {
     return this.allocate(MONO_CHUNK_S8, WrappedChunk);
 }
 
-Allocator.prototype.float64 = function(hostValue) {
+Allocator.prototype.float64 = function (hostValue) {
     const result = this.allocate(MONO_FLOAT64, WrappedFloat64);
     if (hostValue) {
         result.write(hostValue);
@@ -366,7 +366,7 @@ Allocator.prototype.float64 = function(hostValue) {
     return result;
 }
 
-Allocator.prototype.int32 = function(hostValue) {
+Allocator.prototype.int32 = function (hostValue) {
     const result = this.allocate(MONO_INT32, WrappedInt32);
     if (hostValue) {
         result.write(hostValue);
@@ -374,8 +374,8 @@ Allocator.prototype.int32 = function(hostValue) {
     return result;
 }
 
-Allocator.prototype.allocate = function(monoKind, wrappedConstructor) {
-    let targetRegion = this.regions[ this.regions.length - 1 ];
+Allocator.prototype.allocate = function (monoKind, wrappedConstructor) {
+    let targetRegion = this.regions[this.regions.length - 1];
     const size = Mono.prototype.sizeFromKind(monoKind);
     if (!targetRegion.capable(size)) {
         // May trigger GC (TODO)
@@ -386,8 +386,8 @@ Allocator.prototype.allocate = function(monoKind, wrappedConstructor) {
     return wrapped;
 }
 
-Allocator.prototype.latestRegion = function() {
-    return this.regions[ this.regions.length - 1 ];
+Allocator.prototype.latestRegion = function () {
+    return this.regions[this.regions.length - 1];
 }
 
 
@@ -396,16 +396,16 @@ function WrappedObject(mono) {
 }
 
 // Int and Float can be directly written to the slots.
-WrappedObject.prototype.write = function(propertyName, hostValue) {
-    
+WrappedObject.prototype.write = function (propertyName, hostValue) {
+
 }
 
 // Otherwise, it is a thing already on the heap.
-WrappedObject.prototype.attach = function(propertyName, mono) {
+WrappedObject.prototype.attach = function (propertyName, mono) {
 
 }
 
-WrappedObject.prototype.detach = function(propertyName) {
+WrappedObject.prototype.detach = function (propertyName) {
 
 }
 
@@ -415,12 +415,12 @@ function WrappedInt32(mono) {
 }
 
 // @public
-WrappedInt32.prototype.read = function() {
+WrappedInt32.prototype.read = function () {
     return this.mono.region.readInt32(this.mono.valueFrom);
 }
 
 // @public
-WrappedInt32.prototype.write = function(hostInt32) {
+WrappedInt32.prototype.write = function (hostInt32) {
     return this.mono.region.writeInt32(this.mono.valueFrom, hostInt32);
 }
 
@@ -430,12 +430,12 @@ function WrappedFloat64(mono) {
 }
 
 // @public
-WrappedFloat64.prototype.read = function() {
+WrappedFloat64.prototype.read = function () {
     return this.mono.region.readFloat64(this.mono.valueFrom);
 }
 
 // @public
-WrappedFloat64.prototype.write = function(hostFloat64) {
+WrappedFloat64.prototype.write = function (hostFloat64) {
     return this.mono.region.writeFloat64(this.mono.valueFrom, hostFloat64);
 }
 
@@ -448,11 +448,11 @@ function WrappedChunk(mono) {
     this.atToNext = this.mono.endAt - 3;
 }
 
-WrappedChunk.prototype.readChunkLength = function() {
-    return this.mono.region.readUint8(this.atChunkLength); 
+WrappedChunk.prototype.readChunkLength = function () {
+    return this.mono.region.readUint8(this.atChunkLength);
 }
 
-WrappedChunk.prototype.writeChunkLength = function(length) {
+WrappedChunk.prototype.writeChunkLength = function (length) {
     return this.mono.region.writeUint8(this.atChunkLength, length)
 }
 
@@ -463,7 +463,7 @@ WrappedChunk.prototype.writeChunkLength = function(length) {
 // region address: 11 + 0 * 4  - [ 32bits pointer ]
 //                 11 + 1 * 4  - [ 32bits pointer ]
 //                  ...
-WrappedChunk.prototype.chunkAppend = function(wrapped) {
+WrappedChunk.prototype.chunkAppend = function (wrapped) {
     if (this.isChunkFull()) { return false; }
     const currentLength = this.readChunkLength();
 
@@ -474,7 +474,7 @@ WrappedChunk.prototype.chunkAppend = function(wrapped) {
     this.writeChunkLength(currentLength + 1);
 }
 
-WrappedChunk.prototype.chunkIndex = function(idxChunk) {
+WrappedChunk.prototype.chunkIndex = function (idxChunk) {
     const monoAt = this.addressFromIndex(idxChunk);
 
     // Get heap address stored in the chunk, at a region local address.
@@ -485,19 +485,18 @@ WrappedChunk.prototype.chunkIndex = function(idxChunk) {
     return new Wrapped(fetched);
 }
 
-WrappedChunk.prototype.traverseChunkAddresses = function(icb) {
+WrappedChunk.prototype.traverseChunkAddresses = function (icb) {
     for (let i = 0, regionAddress;
-         i < this.readChunkLength(); i ++)
-    {
+        i < this.readChunkLength(); i++) {
         regionAddress = this.addressFromIndex(i);
         icb(i, this.mono.region.readAddress(regionAddress));
-    } 
+    }
 }
 
 
 // Debugging function.
 // Return a `{ regionAddress: heapAddress }` object
-WrappedChunk.prototype.chunkToHost = function() {
+WrappedChunk.prototype.chunkToHost = function () {
     const result = {};
     this.traverseChunkAddresses((i, address) => {
         regionAddress = this.addressFromIndex(i);
@@ -508,11 +507,11 @@ WrappedChunk.prototype.chunkToHost = function() {
     return result;
 }
 
-WrappedChunk.prototype.setChunkNext = function(heapAddress) {
+WrappedChunk.prototype.setChunkNext = function (heapAddress) {
     this.mono.region.writeAddress(this.atToNext, heapAddress);
 }
 
-WrappedChunk.prototype.fetchNextChunk = function() {
+WrappedChunk.prototype.fetchNextChunk = function () {
     // from latest [-3, -2, -1, -0] is the address of the next chunk.
     const nextChunkAddress = this.mono.region.readAddress(this.atToNext);
     if (0 === nextChunkAddress) {  // not connected to next chunk yet.
@@ -522,7 +521,7 @@ WrappedChunk.prototype.fetchNextChunk = function() {
     return new WrappedChunk(nextChunkMono);
 }
 
-WrappedChunk.prototype.isChunkFull = function(wrapped) {
+WrappedChunk.prototype.isChunkFull = function (wrapped) {
     const length = this.readChunkLength();
     if (length + 1 > MONO_CHUNK_SIZE) {
         return true;
@@ -531,7 +530,7 @@ WrappedChunk.prototype.isChunkFull = function(wrapped) {
 }
 
 // Region address from index.
-WrappedChunk.prototype.addressFromIndex = function(idx) {
+WrappedChunk.prototype.addressFromIndex = function (idx) {
     return this.elementsFrom + idx * 4;
 }
 
@@ -553,7 +552,7 @@ function WrappedArray(mono) {
 
 
 // @public
-WrappedArray.prototype.index = function(idx) {
+WrappedArray.prototype.index = function (idx) {
     const length = this.readLength();
     if (idx >= length || idx < 0) {
         throw new Error("Index out of range: " + idx + ' vs. ' + length);
@@ -567,7 +566,7 @@ WrappedArray.prototype.index = function(idx) {
 }
 
 // @public
-WrappedArray.prototype.append = function(wrapped) {
+WrappedArray.prototype.append = function (wrapped) {
     const length = this.readLength();
     let [latestValidChunk, latestChunk] = this.findChunk(length); // [ length ] is the lastest empty slot to append.
 
@@ -595,16 +594,16 @@ WrappedArray.prototype.append = function(wrapped) {
 // and copy the address without wrapping.
 //
 // @public
-WrappedArray.prototype.clone = function(from, to) {
+WrappedArray.prototype.clone = function (from, to) {
     const newArray = this.mono.region.heap.allocator.array();
-    for (let i = 0; i < this.length(); i ++) {
+    for (let i = 0; i < this.length(); i++) {
         newArray.append(this.index(i));
     }
     return newArray;
 }
 
 // @public
-WrappedArray.prototype.cloneFromTo = function(from, to) {
+WrappedArray.prototype.cloneFromTo = function (from, to) {
     const currentLength = this.readLength();
     if (from < 0 || from >= currentLength) {
         throw new Error("Invalid clone from: ", from, to);
@@ -613,7 +612,7 @@ WrappedArray.prototype.cloneFromTo = function(from, to) {
         throw new Error("Invalid clone to: ", to, to);
     }
     const newArray = this.mono.region.heap.allocator.array();
-    for (let i = from; i <= to; i ++) {
+    for (let i = from; i <= to; i++) {
         newArray.append(this.index(i));
     }
     return newArray;
@@ -621,84 +620,84 @@ WrappedArray.prototype.cloneFromTo = function(from, to) {
 
 // Slow, expensive but we have no time for clever methods.
 // TODO: should have better method.
-WrappedArray.prototype.concat = function(second) {
+WrappedArray.prototype.concat = function (second) {
     const newArray = this.mono.region.heap.allocator.array();
-    for (let i = 0; i < this.readLength(); i ++) {
+    for (let i = 0; i < this.readLength(); i++) {
         newArray.append(this.index(i));
     }
-    for (let i = 0; i < second.readLength(); i ++) {
+    for (let i = 0; i < second.readLength(); i++) {
         newArray.append(second.index(i));
     }
     return newArray;
 }
 
 // @public
-WrappedArray.prototype.length = function() {
+WrappedArray.prototype.length = function () {
     return this.readLength();
 }
 
-WrappedArray.prototype.readLength = function() {
+WrappedArray.prototype.readLength = function () {
     // NOTE: since we used Uint8 array, default should be 0,
     // so the new array will have 0 length as we want.
     return this.mono.region.readUint32(this.atLength);
 }
 
-WrappedArray.prototype.writeLength = function(length) {
+WrappedArray.prototype.writeLength = function (length) {
     this.mono.region.writeUint32(this.atLength, length);
 }
 
 // Chunk funtions here is for the default chunk allocated along with the Array.
 
-WrappedArray.prototype.readChunkLength = function() {
-   return WrappedChunk.prototype.readChunkLength.apply(this, []);
+WrappedArray.prototype.readChunkLength = function () {
+    return WrappedChunk.prototype.readChunkLength.apply(this, []);
 }
 
-WrappedArray.prototype.writeChunkLength = function(length) {
+WrappedArray.prototype.writeChunkLength = function (length) {
     return WrappedChunk.prototype.writeChunkLength.apply(this, [length]);
 }
 
-WrappedArray.prototype.chunkIndex = function(idxChunk) {
+WrappedArray.prototype.chunkIndex = function (idxChunk) {
     return WrappedChunk.prototype.chunkIndex.apply(this, [idxChunk]);
 }
 
-WrappedArray.prototype.isChunkFull = function() {
+WrappedArray.prototype.isChunkFull = function () {
     return WrappedChunk.prototype.isChunkFull.apply(this, []);
 }
 
-WrappedArray.prototype.chunkAppend = function(wrapped) {
+WrappedArray.prototype.chunkAppend = function (wrapped) {
     return WrappedChunk.prototype.chunkAppend.apply(this, [wrapped]);
 }
 
-WrappedArray.prototype.chunkToHost = function() {
+WrappedArray.prototype.chunkToHost = function () {
     return WrappedChunk.prototype.chunkToHost.apply(this, []);
 }
 
-WrappedArray.prototype.setChunkNext = function(heapAddress) {
+WrappedArray.prototype.setChunkNext = function (heapAddress) {
     return WrappedChunk.prototype.setChunkNext.apply(this, [heapAddress]);
 }
 
-WrappedArray.prototype.addressFromIndex = function(idx) {
+WrappedArray.prototype.addressFromIndex = function (idx) {
     return WrappedChunk.prototype.addressFromIndex.apply(this, [idx]);
 }
 
-WrappedArray.prototype.traverseChunkAddresses = function(icb) {
+WrappedArray.prototype.traverseChunkAddresses = function (icb) {
     return WrappedChunk.prototype.traverseChunkAddresses.apply(this, [icb]);
 }
 
-WrappedArray.prototype.fetchNextChunk = function() {
+WrappedArray.prototype.fetchNextChunk = function () {
     return WrappedChunk.prototype.fetchNextChunk.apply(this, []);
 }
 
 // Given index, give chunk it should be in.
-WrappedArray.prototype.findChunk = function(idx) {
-    const targetChunkId = (idx/MONO_CHUNK_SIZE>>0);
+WrappedArray.prototype.findChunk = function (idx) {
+    const targetChunkId = (idx / MONO_CHUNK_SIZE >> 0);
     let targetChunk;
     if (0 === targetChunkId) {  // this array base + default chunk.
         targetChunk = this;
     } else {
         let validChunk = this
         let fetchedChunk = this;
-        for (let chunkId = 0; chunkId < targetChunkId; chunkId ++) {
+        for (let chunkId = 0; chunkId < targetChunkId; chunkId++) {
             fetchedChunk = validChunk.fetchNextChunk();
             if (false === fetchedChunk) {
                 return [validChunk, false];
@@ -711,15 +710,15 @@ WrappedArray.prototype.findChunk = function(idx) {
     return [targetChunk, targetChunk];
 }
 
-WrappedArray.prototype.traverseChunks = function(cb) {
-    const latestChunkId = ((this.length() - 1)/MONO_CHUNK_SIZE>>0);
+WrappedArray.prototype.traverseChunks = function (cb) {
+    const latestChunkId = ((this.length() - 1) / MONO_CHUNK_SIZE >> 0);
 
     if (0 === latestChunkId) {  // this array base + default chunk.
         cb(this);
     } else {
         let validChunk = this
         let fetchedChunk = this;
-        for (let chunkId = 0; chunkId < latestChunkId; chunkId ++) {
+        for (let chunkId = 0; chunkId < latestChunkId; chunkId++) {
             fetchedChunk = validChunk.fetchNextChunk()
             if (false === fetchedChunk) {
                 return; // latest chunk will has invalid next chunk.
@@ -730,7 +729,7 @@ WrappedArray.prototype.traverseChunks = function(cb) {
     }
 }
 
-WrappedArray.prototype.lastestChunk = function() {
+WrappedArray.prototype.lastestChunk = function () {
     const [_, latestChunk] = this.findChunk(this.length() - 1);
     if (!lastChunk) {
         throw new Error("Index wrong to find latestChunk");
@@ -746,7 +745,7 @@ function Wrapped(mono) {
 // TODO: return Monad to encapsulate operations.
 
 // From generic Wrapped to like WrappedFloat64, according to the mono kind.
-Wrapped.prototype.dispatch = function() {
+Wrapped.prototype.dispatch = function () {
     switch (this.mono.kind) {
         case MONO_INT32:
             return new WrappedInt32(this.mono);
@@ -767,7 +766,7 @@ Wrapped.prototype.dispatch = function() {
     }
 }
 
-Wrapped.prototype.read = function() {
+Wrapped.prototype.read = function () {
     return null;
 }
 
@@ -783,7 +782,7 @@ function test() {
     );
     console.log("----");
 
-    for (let i = 0, newMono, hostFloat64; i < 4; i ++) {
+    for (let i = 0, newMono, hostFloat64; i < 4; i++) {
         hostFloat64 = i + 0.91;
         newMono = testRegion.createMono(MONO_FLOAT64);
         newWrapped = new WrappedFloat64(newMono);
@@ -792,7 +791,7 @@ function test() {
     }
     console.log("----");
 
-    for (let i = 0, newMono, hostInt32; i < 4; i ++) {
+    for (let i = 0, newMono, hostInt32; i < 4; i++) {
         hostInt32 = i * -1;
         newMono = testRegion.createMono(MONO_INT32);
         newWrapped = new WrappedInt32(newMono);
@@ -801,7 +800,7 @@ function test() {
     }
     console.log("----");
 
-    for (let i = 0, newMono, heapAddress, fetchedMono; i < 4; i ++) {
+    for (let i = 0, newMono, heapAddress, fetchedMono; i < 4; i++) {
         hostInt32 = i * -1;
         newMono = testRegion.createMono(MONO_INT32);
         heapAddress = newMono.heapAddress();
@@ -814,7 +813,7 @@ function test() {
     console.log("region usage: ", testRegion.counter);
 
     testRegion.traverse((mono) => {
-        console.log('traverse mono: ', mono.kind, '[ ', mono.beginFrom, ' - ' , mono.endAt, ' ]');
+        console.log('traverse mono: ', mono.kind, '[ ', mono.beginFrom, ' - ', mono.endAt, ' ]');
     })
 }
 
@@ -822,7 +821,7 @@ function testArray() {
     const heap = new Heap();
     const wrappedArray = heap.allocator.array();
 
-    for (let i = 0, newWrappedFloat64, newWrappedInt32, hostInt32, hostFloat64; i < 6; i ++) {
+    for (let i = 0, newWrappedFloat64, newWrappedInt32, hostInt32, hostFloat64; i < 6; i++) {
         hostFloat64 = i + 0.91;
         hostInt32 = i - 1;
 
@@ -843,17 +842,17 @@ function testArray() {
         console.log("[test array] default chunk to host after append: \n ", wrappedArray.chunkToHost());
     }
 
-    for (let i = 0; i < 12; i ++) {
+    for (let i = 0; i < 12; i++) {
         const wrapped = wrappedArray.index(i);
         const dispatched = wrapped.dispatch();
-        console.log("[test array] index at: ", i, " result: " , (dispatched.read) ? dispatched.read() : null);
+        console.log("[test array] index at: ", i, " result: ", (dispatched.read) ? dispatched.read() : null);
     }
 
     const cloned = wrappedArray.clone();
-    for (let i = 0, clonedValue, originalValue; i < wrappedArray.length(); i ++) {
+    for (let i = 0, clonedValue, originalValue; i < wrappedArray.length(); i++) {
         originalValue = wrappedArray.index(i).dispatch();
         clonedValue = cloned.index(i).dispatch();
-        
+
         console.log(
             "[test array] cloned at: ", i,
             " original: ", originalValue.read(),
@@ -870,7 +869,7 @@ function example() {
     // () => { [0..9].map((i) => i + 1.9) }();
     // EqualTo:
     let wrappedArray = heap.allocator.array();
-    for (let i = 0, newFloat64, appended = wrappedArray; i < 10; i ++) {
+    for (let i = 0, newFloat64, appended = wrappedArray; i < 10; i++) {
         newFloat64 = heap.allocator.float64();
         newFloat64.write(i + 1.9);
         wrappedArray.append(newFloat64);
