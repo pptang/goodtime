@@ -35,6 +35,13 @@ const MONO_NAMED_PROPERTY_S8 = 6 // (addressToStringMono, addressToMono) * 8
 
 const MONO_CHUNK_SIZE = 8 // 8 elements per chunk.
 
+type address = uint64
+type offset = uint32
+
+var ErrorMessageOffsetUnderflow = "Address to offset underflow: %d - %d"
+var ErrorMessageOffsetOutOfRange = "Offset out of the range: %d vs. %d"
+var ErrorMessageUnknownKind = "Unknown kind: %d"
+
 type Heap struct {
 	content        [][]byte
 	contentCounter uint64
@@ -62,11 +69,11 @@ type Region struct {
 
 	// Read how many Slot/byte has been used.
 	// At any time `content[counter]` is the last byte has NOT been occupied.
-	counter uint64
+	counter uint32
 
 	// Flag of what kind of this region is.
 	// Like, an Eden, or a humogous region.
-	kind int64
+	kind byte
 }
 
 // Mono is a thing composes of bytes, correspond to one thing the guest language
@@ -103,15 +110,15 @@ type Mono struct {
 	kind byte
 
 	// **Heap addresses** where this Mono begins from and ends at.
-	beginFrom uint64
-	endAt     uint64
+	beginFrom address
+	endAt     address
 
 	// beginFrom +  1 byte; where to start to read the value.
-	valueFrom uint64
+	valueFrom address
 
 	// **region offsets**: how many bytes far from the beginning of the regions.
-	beginOffset uint32
-	endOffset   uint32
+	beginOffset offset
+	endOffset   offset
 }
 
 // Our "memory" the where whole guest language lives in.
@@ -173,6 +180,103 @@ func (heap *Heap) NewRegion() *Region {
 	}
 }
 
+// Fetch a mono from the heap by address, not from a region by an offset.
+// The address must point to the header byte of the Mono.
+func (heap *Heap) FetchMono(address address) (*Mono, error) {
+	// This address is at which content block on the heap.
+	contentIndex := (address / REGION_SIZE >> 0)
+	if contentIndex > NUMBER_REGIONS {
+		return nil, errors.New(fmt.Sprintf("Address out of Region range: #%v", address))
+	}
+
+	// Find the headless content block.
+	//
+	// Content is just bunch of memory and thus we cannot use Region's methods
+	// before we form/create the Region for it.
+	contentBlock := heap.content[contentIndex]
+
+	// At which region offset the Mono begins from
+	monoOffset := offset(address % REGION_SIZE)
+
+	// At which content (ex: #19 begin from #0) * REGION_SIZE = address of the region header.
+	regionBeginFrom := contentIndex * REGION_SIZE
+
+	// From the target content, form the Region, so we can use region methods.
+	region := heap.RegionFromContent(regionBeginFrom, REGION_SIZE, contentBlock)
+	monoKind, err := region.ReadByte(monoOffset)
+	if err != nil {
+		return nil, err
+	}
+	return region.NewMono(monoKind, monoOffset)
+}
+
+// From heap address to region offset (address - region.beginFrom)
+// NOTE: Go doesn't detect underflow! Error is for addresses before the region's beginning.
+func (region *Region) offsetFromAddress(address address) (offset, error) {
+	offset := offset(address - region.beginFrom)
+	if address < region.beginFrom {
+		return offset,
+			errors.New(fmt.Sprintf(ErrorMessageOffsetUnderflow, address, region.beginFrom))
+	}
+	return offset, nil
+}
+
+// Read the #4 byte from the region beginning to get the region kind.
+func (region *Region) ReadKind() error {
+	kind, err := region.ReadByte(4)
+	if err != nil {
+		return err
+	}
+	if kind == 0 { // new region; mark it as Eden.
+		region.kind = REGION_EDEN
+		region.WriteKind(REGION_EDEN)
+	} else {
+		region.kind = kind
+	}
+	return nil
+}
+
+func (region *Region) ReadCounter() error {
+	counter, err := region.ReadUint32(0)
+	if err != nil {
+		return err
+	}
+
+	// totally new region; any created region must has its own counter + kind bytes occupied
+	if counter == 0 {
+		region.counter = 5 // counter + kind
+		region.WriteCounter()
+	} else {
+		region.counter = counter
+	}
+	return nil
+}
+
+// Write the #4 byte for the assigned kind.
+func (region *Region) WriteKind(kind byte) error {
+	switch kind {
+	case REGION_EDEN:
+		region.WriteByte(4, kind)
+		return nil
+	case REGION_SURVIVOR:
+		region.WriteByte(4, kind)
+		return nil
+	case REGION_TENURED:
+		region.WriteByte(4, kind)
+		return nil
+	case REGION_HUMOGOUS:
+		region.WriteByte(4, kind)
+		return nil
+	default:
+		return errors.New(fmt.Sprintf(ErrorMessageUnknownKind, kind))
+	}
+}
+
+// Write the #0 byte for the region kind (uint32, needs 4 bytes)
+func (region *Region) WriteCounter() error {
+	return region.WriteUint32(0, region.counter)
+}
+
 // All these read/write functions' `at` is the offset inside the region (from 0 to 1MB).
 // Heap address need to be translated before being used here (by `address - region.beginFrom`)
 
@@ -185,7 +289,7 @@ func (heap *Heap) NewRegion() *Region {
 // guest types. So for example, `ReadUint8` means guest language implementation's `uint8`,
 // not really for Go's.
 
-func (region *Region) ReadUint8(at uint32) (uint8, error) {
+func (region *Region) ReadUint8(at offset) (uint8, error) {
 	if at > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -194,7 +298,11 @@ func (region *Region) ReadUint8(at uint32) (uint8, error) {
 	return region.content[at], nil
 }
 
-func (region *Region) ReadUint32(at uint32) (uint32, error) {
+func (region *Region) ReadByte(at offset) (byte, error) {
+	return region.ReadUint8(at)
+}
+
+func (region *Region) ReadUint32(at offset) (uint32, error) {
 	if at > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -203,7 +311,7 @@ func (region *Region) ReadUint32(at uint32) (uint32, error) {
 	return binary.LittleEndian.Uint32(region.content[at:]), nil
 }
 
-func (region *Region) ReadInt8(at uint32) (int8, error) {
+func (region *Region) ReadInt8(at offset) (int8, error) {
 	if at > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -211,7 +319,7 @@ func (region *Region) ReadInt8(at uint32) (int8, error) {
 	return int8(region.content[at]), nil
 }
 
-func (region *Region) ReadInt32(at uint32) (int32, error) {
+func (region *Region) ReadInt32(at offset) (int32, error) {
 	if at > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -220,7 +328,7 @@ func (region *Region) ReadInt32(at uint32) (int32, error) {
 	return int32(binary.LittleEndian.Uint32(region.content[at:])), nil
 }
 
-func (region *Region) ReadFloat32(at uint32) (float32, error) {
+func (region *Region) ReadFloat32(at offset) (float32, error) {
 	if at > region.size || at+4 > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -235,7 +343,7 @@ func (region *Region) ReadFloat32(at uint32) (float32, error) {
 	return result, err
 }
 
-func (region *Region) ReadFloat64(at uint32) (float64, error) {
+func (region *Region) ReadFloat64(at offset) (float64, error) {
 	if at > region.size || at+8 > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
 	}
@@ -250,7 +358,7 @@ func (region *Region) ReadFloat64(at uint32) (float64, error) {
 	return result, err
 }
 
-func (region *Region) WriteUint8(at uint32, i uint8) error {
+func (region *Region) WriteUint8(at offset, i uint8) error {
 	if at+1 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -260,7 +368,12 @@ func (region *Region) WriteUint8(at uint32, i uint8) error {
 	return nil
 }
 
-func (region *Region) WriteUint32(at uint32, i uint32) error {
+func (region *Region) WriteByte(at offset, i byte) error {
+	// 1 byte = 1 unit8.
+	return region.WriteUint8(at, i)
+}
+
+func (region *Region) WriteUint32(at offset, i uint32) error {
 	if at+4 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -273,11 +386,11 @@ func (region *Region) WriteUint32(at uint32, i uint32) error {
 	return nil
 }
 
-func (region *Region) WriteAddress(at uint32, address uint32) error {
+func (region *Region) WriteAddress(at offset, address uint32) error {
 	return region.WriteUint32(at, address)
 }
 
-func (region *Region) WriteInt8(at uint32, i int8) error {
+func (region *Region) WriteInt8(at offset, i int8) error {
 	if at+1 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -287,7 +400,7 @@ func (region *Region) WriteInt8(at uint32, i int8) error {
 	return nil
 }
 
-func (region *Region) WriteInt32(at uint32, i int32) error {
+func (region *Region) WriteInt32(at offset, i int32) error {
 	if at+4 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -300,7 +413,7 @@ func (region *Region) WriteInt32(at uint32, i int32) error {
 	return nil
 }
 
-func (region *Region) WriteFloat32(at uint32, f float32) error {
+func (region *Region) WriteFloat32(at offset, f float32) error {
 	if at+4 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -313,7 +426,7 @@ func (region *Region) WriteFloat32(at uint32, f float32) error {
 	return nil
 }
 
-func (region *Region) WriteFloat64(at uint32, f float64) error {
+func (region *Region) WriteFloat64(at offset, f float64) error {
 	if at+8 > region.size || at < 0 {
 		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
 	}
@@ -326,25 +439,42 @@ func (region *Region) WriteFloat64(at uint32, f float64) error {
 	return nil
 }
 
-func (region *Region) NewMono(kind byte, beginFrom uint64) (*Mono, error) {
-
+// Form a Mono from the region offset.
+// There is no complicated "creation" of Monos, since a mono is just a memory block in the region
+// with a header byte. The header is the only important thing to the mono and region.
+//
+// Therefore, to create a whole new Mono, the allocator just write the header byte at the address.
+func (region *Region) NewMono(kind byte, beginOffset offset) (*Mono, error) {
 	monoSize, err := monoSizeFromKind(kind)
 	if err != nil {
 		return nil, err
 	}
 
+	var beginFrom address
+	if region.beginFrom+uint64(beginOffset) > region.endAt {
+		return nil, errors.New(
+			fmt.Sprintf(ErrorMessageOffsetOutOfRange,
+				region.endAt, region.beginFrom+uint64(beginOffset)))
+	} else {
+		beginFrom = region.beginFrom + uint64(beginOffset)
+	}
+
 	return &Mono{
-		region:    region,
-		kind:      kind,
-		beginFrom: beginFrom,
-		endAt:     beginFrom + monoSize,
-		valueFrom: beginFrom,
+		region:      region,
+		kind:        kind,
+		beginOffset: beginOffset,
+		endOffset:   beginOffset + monoSize,
+		beginFrom:   beginFrom,
+		endAt:       beginFrom + uint64(monoSize),
+		valueFrom:   beginFrom + 1,
 	}, nil
 }
 
-func monoSizeFromKind(kind byte) (uint64, error) {
+func monoSizeFromKind(kind byte) (uint32, error) {
 	switch kind {
 	case MONO_INT32:
+		// 1 + 4 (header: 1 byte + int32)
+		return 5, nil
 	case MONO_ADDRESS:
 		// 1 + 4 (header: 1 byte + int32)
 		return 5, nil
@@ -374,27 +504,5 @@ func monoSizeFromKind(kind byte) (uint64, error) {
 // Write header information onto region content.
 // REMEMBER TO CALL THIS for any newly created Mono.
 func (mono *Mono) WriteHeader() error {
-	return mono.region.WriteUint8(mono.beginFrom, mono.kind)
-}
-
-// Fetch a mono from the heap by address, not from a region by an offset.
-func (heap *Heap) FetchMono(address uint64) (*Mono, error) {
-	regionIndex := (address / REGION_SIZE >> 0)
-	if regionIndex > NUMBER_REGIONS {
-		return nil, errors.New(fmt.Sprintf("Address out of Region range: #%v", address))
-	}
-
-	// Find the headless content block.
-	//
-	// Content is just bunch of memory and thus we cannot use Region's methods
-	// before we form/create the Region for it.
-	content := heap.content[regionIndex]
-	contentIndex := address % REGION_SIZE // index inside the region.
-
-	// From the target content, form the Region, so we can use its methods.
-	beginFrom := regionIndex * REGION_SIZE
-	region := NewRegion(heap, beginFrom, REGION_SIZE, content)
-
-	monoKind := content[contentIndex]              // 1 byte header uint8 can be read directly.
-	return NewMono(region, monoKind, contentIndex) // beginFrom of Mono is inside the region
+	return mono.region.WriteByte(mono.beginOffset, mono.kind)
 }
