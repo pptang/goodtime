@@ -41,6 +41,8 @@ type offset = uint32
 var ErrorMessageOffsetUnderflow = "Address to offset underflow: %d - %d"
 var ErrorMessageOffsetOutOfRange = "Offset out of the range: %d vs. %d"
 var ErrorMessageUnknownKind = "Unknown kind: %d"
+var ErrorMessageHeapFull = "Heap is full (need GC)"
+var ErrorRegionFull = "Region is full: cannot allocate %d bytes"
 
 type Heap struct {
 	content        [][]byte
@@ -121,6 +123,11 @@ type Mono struct {
 	endOffset   offset
 }
 
+type Allocator struct {
+	heap    *Heap
+	regions []*Region
+}
+
 // Our "memory" the where whole guest language lives in.
 func NewHeap() *Heap {
 	// Pre-allocated all regions.
@@ -162,10 +169,15 @@ func (heap *Heap) RegionFromContent(beginFrom uint64, size uint32, content []byt
 }
 
 // On the heap, create a totally new Region with the last unoccupied content block.
-func (heap *Heap) NewRegion() *Region {
+func (heap *Heap) NewRegion() (*Region, error) {
 	// The last unoccupied content block.
 	content := heap.content[heap.contentCounter]
 	beginFrom := heap.contentCounter * REGION_SIZE
+
+	if heap.contentCounter+1 > NUMBER_REGIONS {
+		return nil, errors.New(fmt.Sprint(ErrorMessageHeapFull))
+	}
+
 	return &Region{
 		heap:      heap,
 		size:      REGION_SIZE,
@@ -177,7 +189,7 @@ func (heap *Heap) NewRegion() *Region {
 
 		// Default kind is Eden.
 		kind: 0,
-	}
+	}, nil
 }
 
 // Fetch a mono from the heap by address, not from a region by an offset.
@@ -596,6 +608,29 @@ func (region *Region) NewMono(kind byte, beginOffset offset) (*Mono, error) {
 	}, nil
 }
 
+func (region *Region) CreateMono(kind byte) (*Mono, error) {
+	increase, err := monoSizeFromKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	if !region.capable(increase) {
+		return nil, errors.New(fmt.Sprintf(ErrorRegionFull, increase))
+	}
+	// From the last unoccupied byte of the region,
+	// new a Mono.
+	mono, err := region.NewMono(kind, region.counter)
+	if err != nil {
+		return nil, err
+	}
+	err = mono.WriteHeader()
+	if err != nil {
+		return nil, err
+	}
+
+	region.counter = increase
+	return mono, nil
+}
+
 func monoSizeFromKind(kind byte) (uint32, error) {
 	switch kind {
 	case MONO_INT32:
@@ -631,4 +666,35 @@ func monoSizeFromKind(kind byte) (uint32, error) {
 // REMEMBER TO CALL THIS for any newly created Mono.
 func (mono *Mono) WriteHeader() error {
 	return mono.region.WriteByte(mono.beginOffset, mono.kind)
+}
+
+func (a *Allocator) Allocate(kind byte, wrappedConstructor func(*Mono) *interface{}) (*interface{}, error) {
+	latestRegion := a.latestRegion()
+	size, err := monoSizeFromKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	// If it is not capable, create a new Region then allocate.
+	if !latestRegion.capable(size) {
+		latestRegion, err = a.heap.NewRegion()
+		if err != nil {
+			return nil, err
+		}
+		a.regions = append(a.regions, latestRegion)
+	}
+	mono, err := latestRegion.CreateMono(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	wrapped := wrappedConstructor(mono)
+	return wrapped, nil
+}
+
+func (a *Allocator) latestRegion() *Region {
+	return a.regions[len(a.regions)-1]
+}
+
+func (a *Allocator) Array() error {
+	a.Allocate(MONO_ARRAY_S8) // TODO:
 }
