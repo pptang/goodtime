@@ -311,6 +311,19 @@ func (region *Region) ReadUint32(at offset) (uint32, error) {
 	return binary.LittleEndian.Uint32(region.content[at:]), nil
 }
 
+func (region *Region) ReadUint64(at offset) (uint64, error) {
+	if at > region.size || at < 0 {
+		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
+	}
+
+	// Read from the `at`.
+	return binary.LittleEndian.Uint64(region.content[at:]), nil
+}
+
+func (region *Region) ReadAddress(at offset) (address, error) {
+	return region.ReadUint64(at)
+}
+
 func (region *Region) ReadInt8(at offset) (int8, error) {
 	if at > region.size || at < 0 {
 		return 0, errors.New(fmt.Sprintf("Read from address out of range: %#v", at))
@@ -386,8 +399,21 @@ func (region *Region) WriteUint32(at offset, i uint32) error {
 	return nil
 }
 
-func (region *Region) WriteAddress(at offset, address uint32) error {
-	return region.WriteUint32(at, address)
+func (region *Region) WriteUint64(at offset, i uint64) error {
+	if at+4 > region.size || at < 0 {
+		return errors.New(fmt.Sprintf("Write at address out of range: %#v", at))
+	}
+
+	bytes.NewBuffer(region.content[at:])
+	err := binary.Write(bytes.NewBuffer(region.content[at:]), binary.LittleEndian, i)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (region *Region) WriteAddress(at offset, address address) error {
+	return region.WriteUint64(at, address)
 }
 
 func (region *Region) WriteInt8(at offset, i int8) error {
@@ -435,6 +461,106 @@ func (region *Region) WriteFloat64(at offset, f float64) error {
 	err := binary.Write(bytes.NewBuffer(region.content[at:]), binary.LittleEndian, f)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// New means the used-bytes counter will be increased, while Write won't since
+// it may be for updating, not newly create a value in the region.
+
+func (region *Region) NewUint8(at offset, i uint8) error {
+	if err := region.WriteUint8(at, i); err != nil {
+		return err
+	}
+	region.counter += 1
+	return nil
+}
+
+func (region *Region) NewByte(at offset, bt byte) error {
+	return region.NewUint8(at, bt)
+}
+
+func (region *Region) NewUint32(at offset, i uint32) error {
+	if err := region.WriteUint32(at, i); err != nil {
+		return err
+	}
+	region.counter += 4
+	return nil
+}
+
+func (region *Region) NewUint64(at offset, i uint64) error {
+	if err := region.WriteUint64(at, i); err != nil {
+		return err
+	}
+	region.counter += 8
+	return nil
+}
+
+func (region *Region) NewAddress(at offset, address address) error {
+	return region.NewUint64(at, address)
+}
+
+func (region *Region) NewInt8(at offset, i int8) error {
+	if err := region.WriteInt8(at, i); err != nil {
+		return err
+	}
+	region.counter += 1
+	return nil
+}
+
+func (region *Region) NewInt32(at offset, i int32) error {
+	if err := region.WriteInt32(at, i); err != nil {
+		return err
+	}
+	region.counter += 4
+	return nil
+}
+
+func (region *Region) NewFloat32(at offset, f float32) error {
+	if err := region.WriteFloat32(at, f); err != nil {
+		return err
+	}
+	region.counter += 4
+	return nil
+}
+
+func (region *Region) NewFloat64(at offset, f float64) error {
+	if err := region.WriteFloat64(at, f); err != nil {
+		return err
+	}
+	region.counter += 8
+	return nil
+}
+
+// If the region is still as empty as here requires.
+func (region *Region) capable(n uint32) bool {
+	if region.counter+n > region.size {
+		return false
+	}
+	return true
+}
+
+func (region *Region) traverse(cb func(*Mono) error) error {
+	for beginOffset := uint32(5); beginOffset < region.counter; {
+		fmt.Printf("Try to visit mono at: %d", beginOffset) // TODO: real logger.
+		kind, err := region.ReadByte(beginOffset)
+		if err != nil {
+			return err
+		}
+		if kind == 0 {
+			// End of monos. We traverse by jumping among Mono headers,
+			// if we got a 0 then this means unoccupied area which has no Mono yet.
+			break
+		}
+		mono, err := region.NewMono(kind, beginOffset)
+		if err != nil {
+			return err
+		}
+		err = cb(mono)
+		if err != nil {
+			return err
+		}
+		beginOffset = mono.endOffset + 1
 	}
 	return nil
 }
