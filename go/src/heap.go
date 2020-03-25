@@ -42,7 +42,10 @@ var ErrorMessageOffsetUnderflow = "Address to offset underflow: %d - %d"
 var ErrorMessageOffsetOutOfRange = "Offset out of the range: %d vs. %d"
 var ErrorMessageUnknownKind = "Unknown kind: %d"
 var ErrorMessageHeapFull = "Heap is full (need GC)"
-var ErrorRegionFull = "Region is full: cannot allocate %d bytes"
+var ErrorMessageChunkFull = "Chunk is full"
+var ErrorMessageRegionFull = "Region is full: cannot allocate %d bytes"
+var ErrorMessageCannotReadChunkLength = "Cannot read chunk length"
+var ErrorMessageCannotReadRegionOffset = "Cannot read by region offset: %d"
 
 type Heap struct {
 	content        [][]byte
@@ -111,16 +114,22 @@ type Mono struct {
 	// 1 byte flag
 	kind byte
 
-	// **Heap addresses** where this Mono begins from and ends at.
+	// **Heap address** where this Mono begins from.
 	beginFrom address
-	endAt     address
+
+	// **Heap address** where this Mono ends at.
+	endAt address
 
 	// beginFrom +  1 byte; where to start to read the value.
 	valueFrom address
 
-	// **region offsets**: how many bytes far from the beginning of the regions.
+	// **region offset**: how many bytes far from the beginning of the regions.
 	beginOffset offset
-	endOffset   offset
+
+	// **region offset**: how many bytes far from the beginning of the regions.
+	endOffset offset
+
+	valueFromOffset offset
 }
 
 type Allocator struct {
@@ -614,7 +623,7 @@ func (region *Region) CreateMono(kind byte) (*Mono, error) {
 		return nil, err
 	}
 	if !region.capable(increase) {
-		return nil, errors.New(fmt.Sprintf(ErrorRegionFull, increase))
+		return nil, errors.New(fmt.Sprintf(ErrorMessageRegionFull, increase))
 	}
 	// From the last unoccupied byte of the region,
 	// new a Mono.
@@ -695,6 +704,204 @@ func (a *Allocator) latestRegion() *Region {
 	return a.regions[len(a.regions)-1]
 }
 
-func (a *Allocator) Array() error {
-	a.Allocate(MONO_ARRAY_S8) // TODO:
+func (a *Allocator) Array() (*WrappedArray, error) {
+	wrapped, err := a.Allocate(MONO_ARRAY_S8, func(mono *Mono) *interface{} {
+		var wrapped interface{}
+		wrapped = NewWrappedArray(mono)
+		return &wrapped
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result *WrappedArray
+	result = (*wrapped).(*WrappedArray)
+	return result, nil
+}
+
+// Chunk for array. Since array can contain as many as chunks until
+// out of memory, 1 array is a linked list of chunks.
+//
+// Chunks are with the same fixed size by MONO_CHUNK_SIZE.
+// It means how many pointers can be in one chunk. Like, 8 pointers
+// to 8 monos. Since they are all pointers, one chunk can contain
+// many different types as its array is. For example,
+//
+// [1, "foo", [3.14, "bar"], 199]
+//
+type WrappedChunk struct {
+	mono               *Mono
+	elementsFromOffset offset // region offset
+	atLength           offset
+	atToNext           offset
+}
+
+func NewWrappedChunk(mono *Mono) *WrappedChunk {
+	return &WrappedChunk{
+		mono: mono,
+
+		// First 1 byte is chunk length, so that
+		// [ #1 ] is the first element (pointer).
+		elementsFromOffset: mono.valueFromOffset + 1,
+
+		// [ #0 ] is the 1 byte chunk length uint8
+		atLength: mono.valueFromOffset + 4,
+
+		// [#-3 - #-0] is the address (pointer) to next chunk
+		atToNext: mono.endOffset - 3,
+	}
+}
+
+// From the chunk index to region offset.
+//
+// Region: [ ..., #11, #12, #13, #14, ... ]
+// Chunk:       [  #0,  #1,  #2,  #3]
+//
+// Chunk #0 = 1 byte chunk length
+// Chunk #1 = Chunk.elementsFromOffset
+//
+// -> OffsetFromIndex(1) == 13
+// -> since Chunk.elementsFromOffset (12) + 1 = 12
+//
+func (w *WrappedChunk) OffsetFromIndex(index uint8) offset {
+	return w.elementsFromOffset + uint32(index)
+}
+
+func (w *WrappedChunk) ReadLength() (uint8, error) {
+	return w.mono.region.ReadUint8(w.atLength)
+}
+
+func (w *WrappedChunk) WriteLength(length uint8) error {
+	return w.mono.region.WriteUint8(w.atLength, length)
+}
+
+// Append a new element into the chunk.
+// Write address so it will become a pointer.
+//
+// Let's say this chunk's first slot is at region address 11:
+// region address: 11 + 0 * 4  - [ 32bits pointer ]
+//                 11 + 1 * 4  - [ 32bits pointer ]
+//
+func (w *WrappedChunk) Append(pointee *Mono) error {
+
+	// The latest unoccupied slot in this chunk is its length.
+	// [#0, #1, #2, (empty),..] --> length: 3, so [#3] is the empty slot.
+	currentLength, err := w.ReadLength()
+	if err != nil {
+		return errors.New(ErrorMessageCannotReadChunkLength)
+	}
+
+	if IsChunkFull(currentLength) {
+		return errors.New(ErrorMessageChunkFull)
+	}
+	atWriteTo := w.OffsetFromIndex(currentLength)
+	w.mono.region.WriteAddress(atWriteTo, pointee.beginFrom)
+	w.WriteLength(currentLength + 1)
+	return nil
+}
+
+func IsChunkFull(currentLength uint8) bool {
+	if currentLength+1 > MONO_CHUNK_SIZE {
+		return true
+	}
+	return false
+}
+
+// Index a mono in the chunk.
+// The caller need to dispatch the mono to a wrapped thing
+// via `mono.kind` before using it.
+//
+func (w *WrappedChunk) Index(idx uint8) (*Mono, error) {
+	atTargetPointer := w.OffsetFromIndex(idx)
+	pointerToTarget, err := w.mono.region.ReadAddress(atTargetPointer)
+	if err != nil {
+		return nil, errors.New(
+			fmt.Sprintf(ErrorMessageCannotReadRegionOffset, atTargetPointer),
+		)
+	}
+	fetched, err := w.mono.region.heap.FetchMono(pointerToTarget)
+	if err != nil {
+		return nil, err
+	}
+	return fetched, nil
+}
+
+// For debugging: loop over the chunk and handle it with the index
+func (w *WrappedChunk) TraverseAddresses(icb func(uint8, address) error) error {
+	length, err := w.ReadLength()
+	if err != nil {
+		return err
+	}
+
+	for i := uint8(0); i < length; i++ {
+		address, err := w.mono.region.ReadAddress(w.OffsetFromIndex(i))
+		if err != nil {
+			return err
+		}
+		icb(i, address)
+	}
+
+	return nil
+}
+
+func (w *WrappedChunk) WriteNext(pointerToNext address) error {
+	return w.mono.region.WriteAddress(w.atToNext, pointerToNext)
+}
+
+func (w *WrappedChunk) FetchNext() (*WrappedChunk, error) {
+	// from latest [-3, -2, -1, -0] is the address of the next chunk
+	pointerNext, err := w.mono.region.ReadAddress(w.atToNext)
+	if err != nil {
+		return nil, err
+	}
+	monoNext, err := w.mono.region.heap.FetchMono(pointerNext)
+	if err != nil {
+		return nil, err
+	}
+	return NewWrappedChunk(monoNext), nil
+}
+
+// Dynamic typed array.
+// So it only contains addresses (pointers) of monos
+// And since we have all data structures in immutable,
+// operations will all allocate a new array while re-addressing old elements.
+//
+// Array must be with chunk(s). The first (#0) chunk is appened to the Array itself,
+// while other chunks are connected by the pointer at `atToNext`. Read it,
+// to get the pointer of where the next chunk is.
+//
+type WrappedArray struct {
+	mono               *Mono
+	elementsFromOffset offset
+	atLength           offset
+	atChunkLength      offset
+	atToNext           offset
+}
+
+func NewWrappedArray(mono *Mono) *WrappedArray {
+	return &WrappedArray{
+		mono: mono,
+
+		// First 4 bytes are length.
+		// Then 1 byte for chunk length (init chunk is within the Array mono)
+		elementsFromOffset: mono.valueFromOffset + 5,
+
+		// [ #1 - #4 ] is array length
+		atLength: mono.valueFromOffset,
+
+		// [ #5 ] is default chunk length (MONO_CHUNK_SIZE)
+		atChunkLength: mono.valueFromOffset + 4,
+
+		// [#-3 - #-0] is address (pointer) to next chunk
+		atToNext: mono.endOffset - 3,
+	}
+}
+
+func (wa *WrappedArray) ReadLength() (uint32, error) {
+	// NOTE: since we used Uint8 array, default should be 0,
+	// so the new array will have 0 length as we want.
+	return wa.mono.region.ReadUint32(wa.atLength)
+}
+
+func (wa *WrappedArray) WriteLength(length uint32) error {
+	return wa.mono.region.WriteUint32(wa.atLength, length)
 }
