@@ -1,5 +1,5 @@
-const main = () => {
-  const result = 123;
+function main() {
+  var result = 123;
   return result + 3;
 };
 
