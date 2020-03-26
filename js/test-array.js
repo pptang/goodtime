@@ -1,5 +1,7 @@
-const arr = [1, 2, 3, 4, 5];
+var arr = [1, 2, 3, 4, 5];
 
-const result = arr.map(i => i + 1);
+var result = arr.map(function(i) {
+  return i + 1;
+});
 
 console.log(result);
