@@ -4,8 +4,8 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/pptang/goodtime/go/otto"
-	"github.com/pptang/goodtime/go/otto/parser"
+	"github.com/pptang/goodtime/go/goodtime/otto"
+	"github.com/pptang/goodtime/go/goodtime/otto/parser"
 )
 
 func main() {

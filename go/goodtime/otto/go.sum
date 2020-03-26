@@ -1,9 +1,9 @@
-github.com/pptang/goodtime v0.0.0-20200326075935-179be205f147 h1:vfbqgvOCgr2zvJBQzBAUN31j9RCP0hd/STkX/3Fnsms=
-github.com/pptang/goodtime/go v0.0.0-20200326075935-179be205f147 h1:kjc/e7LWo8go8zS5ZomPx/q1WzXlVv6S2GsQECGHYNk=
+github.com/pptang/goodtime v0.0.0-20200326032636-45d6a7019945 h1:Nk0EeCTsyHjKLUNJAe8d5sgMt+DOVeIkdTz3UfFdr5s=
+github.com/pptang/goodtime/go v0.0.0-20200326032636-45d6a7019945 h1:EIxQ4kkPuSkys4/F/JXAI2KYyZLWVRryBAXX8C+QpLI=
+github.com/pptang/goodtime/go v0.0.0-20200326032636-45d6a7019945/go.mod h1:7Ba909bqRmwr4Cfvy3BuVhlCikk+qlOkdbjjibYSdfI=
+github.com/pptang/otto v0.0.0-20200324101613-c49ef4217df4/go.mod h1:6SCXTFs6ovCwAB66pXtcorTyyeNJ1BjptC1TUOp9lZ4=
 github.com/pptang/goodtime/go/goodtime/otto v0.0.0-20191219234010-c382bd3c16ff h1:+6NUiITWwE5q1KO6SAfUX918c+Tab0+tGAM/mtdlUyA=
 github.com/pptang/goodtime/go/goodtime/otto v0.0.0-20191219234010-c382bd3c16ff/go.mod h1:xvqspoSXJTIpemEonrMDFq6XzwHYYgToXWj5eRX1OtY=
-github.com/pptang/otto v0.0.0-20200324101613-c49ef4217df4 h1:bQVu3LDGN/mvN438V+LRq88zxXP5CUX9buPBfaJdCiM=
-github.com/pptang/otto v0.0.0-20200324101613-c49ef4217df4/go.mod h1:6SCXTFs6ovCwAB66pXtcorTyyeNJ1BjptC1TUOp9lZ4=
 gopkg.in/readline.v1 v1.0.0-20160726135117-62c6fe619375 h1:hPki/oSSWOLiI9Gc9jyIoj33O3j29fUc9PlLha2yDj0=
 gopkg.in/readline.v1 v1.0.0-20160726135117-62c6fe619375/go.mod h1:lNEQeAhU009zbRxng+XOj5ITVgY24WcbNnQopyfKoYQ=
 gopkg.in/sourcemap.v1 v1.0.5 h1:inv58fC9f9J3TK2Y2R1NPntXEn3/wjWHkonhIUODNTI=
