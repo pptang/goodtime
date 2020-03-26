@@ -1,4 +1,4 @@
-module github.com/pptang/goodtime
+module github.com/pptang/goodtime/go
 
 go 1.14
 
