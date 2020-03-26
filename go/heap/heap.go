@@ -46,6 +46,8 @@ var ErrorMessageChunkFull = "Chunk is full"
 var ErrorMessageRegionFull = "Region is full: cannot allocate %d bytes"
 var ErrorMessageCannotReadChunkLength = "Cannot read chunk length"
 var ErrorMessageCannotReadRegionOffset = "Cannot read by region offset: %d"
+var ErrorMessageIndexOutOfRange = "Index out of range: #%d vs. #%d"
+var ErrorMessageIndexedChunkOutOfRange = "The chunk of index #%d is out of range"
 
 // Heap is used to allocate memories
 // to store data used by guest languages
@@ -654,8 +656,8 @@ func monoSizeFromKind(kind byte) (uint32, error) {
 		// 1 + 8
 		return 9, nil
 	case MONO_ARRAY_S8:
-		// 1 + 4 + 1 + 4 * 8 + 4 (header + array length + init chunk length + 8 slots + address to next)
-		return 42, nil
+		// 1 + 4 + 1 + 1 + 4 * 8 + 4 (header + array length + init chunk header + init chunk length + 8 slots + address to next)
+		return 43, nil
 	case MONO_CHUNK_S8:
 		// 1 + 1 + 4 * 8 + 4 (header + chunk length + 8 slots + address to next)
 		return 38, nil
@@ -731,10 +733,10 @@ func (a *Allocator) Array() (*WrappedArray, error) {
 // [1, "foo", [3.14, "bar"], 199]
 //
 type WrappedChunk struct {
-	mono               *Mono
-	elementsFromOffset offset // region offset
-	atLength           offset
-	atToNext           offset
+	mono           *Mono
+	atFirstElement offset // region offset of the first Mono pointer
+	atLength       offset
+	atToNext       offset
 }
 
 func NewWrappedChunk(mono *Mono) *WrappedChunk {
@@ -743,7 +745,7 @@ func NewWrappedChunk(mono *Mono) *WrappedChunk {
 
 		// First 1 byte is chunk length, so that
 		// [ #1 ] is the first element (pointer).
-		elementsFromOffset: mono.valueFromOffset + 1,
+		atFirstElement: mono.valueFromOffset + 1,
 
 		// [ #0 ] is the 1 byte chunk length uint8
 		atLength: mono.valueFromOffset + 4,
@@ -759,13 +761,13 @@ func NewWrappedChunk(mono *Mono) *WrappedChunk {
 // Chunk:       [  #0,  #1,  #2,  #3]
 //
 // Chunk #0 = 1 byte chunk length
-// Chunk #1 = Chunk.elementsFromOffset
+// Chunk #1 = Chunk.atFirstElement
 //
 // -> OffsetFromIndex(1) == 13
-// -> since Chunk.elementsFromOffset (12) + 1 = 12
+// -> since Chunk.atFirstElement (12) + 1 = 12
 //
 func (w *WrappedChunk) OffsetFromIndex(index uint8) offset {
-	return w.elementsFromOffset + uint32(index)
+	return w.atFirstElement + uint32(index)
 }
 
 func (w *WrappedChunk) ReadLength() (uint8, error) {
@@ -862,7 +864,7 @@ func (w *WrappedChunk) FetchNext() (*WrappedChunk, error) {
 	return NewWrappedChunk(monoNext), nil
 }
 
-// Dynamic typed array.
+// Dynamic typed array. Maximum size is uint32.
 // So it only contains addresses (pointers) of monos
 // And since we have all data structures in immutable,
 // operations will all allocate a new array while re-addressing old elements.
@@ -872,29 +874,32 @@ func (w *WrappedChunk) FetchNext() (*WrappedChunk, error) {
 // to get the pointer of where the next chunk is.
 //
 type WrappedArray struct {
-	mono               *Mono
-	elementsFromOffset offset
-	atLength           offset
-	atChunkLength      offset
-	atToNext           offset
+	mono           *Mono
+	atDefaultChunk offset
+	atLength       offset
+	defaultChunk   *WrappedChunk
 }
 
 func NewWrappedArray(mono *Mono) *WrappedArray {
+	defaultChunkMono, err := mono.region.NewMono(
+		MONO_CHUNK_S8,
+		mono.valueFromOffset+4,
+	)
+	if err != nil {
+		// Should not happen since mono space is allocated.
+		panic(err)
+	}
 	return &WrappedArray{
 		mono: mono,
 
-		// First 4 bytes are length.
-		// Then 1 byte for chunk length (init chunk is within the Array mono)
-		elementsFromOffset: mono.valueFromOffset + 5,
+		// [ #0 ] is this Array mono's kind (at -1 of valueFromOffset)
+		// [ #1 - #4 ] is array length (at +0..3 of valueFromOffset)
+		// [ #5 ] is the beginning of the default Chunk mono (at +4 of valueFromOffset)
+		atDefaultChunk: mono.valueFromOffset + 4,
 
-		// [ #1 - #4 ] is array length
-		atLength: mono.valueFromOffset,
-
-		// [ #5 ] is default chunk length (MONO_CHUNK_SIZE)
-		atChunkLength: mono.valueFromOffset + 4,
-
-		// [#-3 - #-0] is address (pointer) to next chunk
-		atToNext: mono.endOffset - 3,
+		// [ #1 - #4 ] is array length (at +0..3 of valueFromOffset)
+		atLength:     mono.valueFromOffset,
+		defaultChunk: NewWrappedChunk(defaultChunkMono),
 	}
 }
 
@@ -906,4 +911,101 @@ func (wa *WrappedArray) ReadLength() (uint32, error) {
 
 func (wa *WrappedArray) WriteLength(length uint32) error {
 	return wa.mono.region.WriteUint32(wa.atLength, length)
+}
+
+// User can pass an index then get the *Mono if it exists in the array.
+// Return nil if there is no such mono.
+// Error if the index is out of range, or due to other internal errors.
+func (wa *WrappedArray) Index(idx uint32) (*Mono, error) {
+	length, err := wa.ReadLength()
+	if err != nil {
+		return nil, err
+	}
+	if idx >= length {
+		return nil, errors.New(fmt.Sprintf(ErrorMessageIndexOutOfRange, idx, length-1))
+	}
+	_, chunk, err := wa.findChunk(idx)
+	if err != nil {
+		return nil, err
+	}
+	if chunk == nil {
+		return nil, errors.New(fmt.Sprintf(ErrorMessageIndexedChunkOutOfRange, idx))
+	}
+
+	// Index inside the chunk.
+	idxChunk := uint8(idx % MONO_CHUNK_SIZE)
+	return chunk.Index(idxChunk)
+}
+
+// Find a chunk the index should be in.
+//
+// Return (lastValidChunk, nil, error):
+// if the index should be in a newly appended chunk, but it hasn't been appended.
+//
+// Return (lastValidChunk, targetChunk, error):
+// if the index is in the `targetChunk`, which is already appended to the array.
+func (wa *WrappedArray) findChunk(idx uint32) (*WrappedChunk, *WrappedChunk, error) {
+	var targetChunk *WrappedChunk
+	var validChunk *WrappedChunk
+	var fetchedChunk *WrappedChunk
+	var err error
+
+	// At which chunk
+	atChunk := (idx / MONO_CHUNK_SIZE >> 0)
+
+	// If at the Array default chunk (#0 chunk)
+	if atChunk == 0 {
+		return wa.defaultChunk, nil, nil
+	} else {
+		validChunk = wa.defaultChunk
+		fetchedChunk = wa.defaultChunk
+		for chunkId := uint32(0); chunkId < atChunk; chunkId++ {
+			fetchedChunk, err = validChunk.FetchNext()
+			if err != nil {
+				return nil, nil, err
+			}
+			// End of the array chunk list. Need to append a new chunk.
+			if fetchedChunk == nil {
+				return validChunk, nil, nil
+			}
+			// Set +1 chunk as where to find in the next iteration.
+			validChunk = fetchedChunk
+		}
+		// Finally found at which chunk the index is.
+		targetChunk = fetchedChunk
+	}
+
+	// Since the targetChunk is also the lastValidChink it traversed.
+	// TODO: arguable, can be changed to (target -1, target, nil)
+	return targetChunk, targetChunk, nil
+}
+
+func (wa *WrappedArray) traverseChunks(cb func(*WrappedChunk) error) error {
+	length, err := wa.ReadLength()
+	if err != nil {
+		return err
+	}
+
+	// Ex: We have in total 10 elements and each chunk size is 8,
+	// so 10 - 1 / 8 >> 0 = #2 chunk is where the #9 (10th) element is.
+	lastChunkId := length - 1/MONO_CHUNK_SIZE>>0
+
+	if lastChunkId == 0 { // default chunk only.
+		cb(wa.defaultChunk)
+	} else {
+		validChunk := wa.defaultChunk
+		fetchedChunk := wa.defaultChunk
+		for chunkId := uint32(0); chunkId < lastChunkId; chunkId++ {
+			fetchedChunk, err = validChunk.FetchNext()
+			if err != nil {
+				return err
+			}
+			if err = cb(fetchedChunk); err != nil {
+				return err
+			}
+			// Set +1 chunk as where to find in the next iteration.
+			validChunk = fetchedChunk
+		}
+	}
+	return nil
 }
