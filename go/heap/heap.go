@@ -47,6 +47,8 @@ var ErrorMessageRegionFull = "Region is full: cannot allocate %d bytes"
 var ErrorMessageCannotReadChunkLength = "Cannot read chunk length"
 var ErrorMessageCannotReadRegionOffset = "Cannot read by region offset: %d"
 
+// Heap is used to allocate memories
+// to store data used by guest languages
 type Heap struct {
 	content        [][]byte
 	contentCounter uint64
