@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-// Heap has have regions.
+// Heap has regions.
 // When a new thing needs to be allocated,
 // Allocator will try to re-use regions it keeps.
 // If there is no enough empty regions, it will ask Heap for more.
@@ -47,7 +47,7 @@ var ErrorMessageRegionFull = "Region is full: cannot allocate %d bytes"
 var ErrorMessageCannotReadChunkLength = "Cannot read chunk length"
 var ErrorMessageCannotReadRegionOffset = "Cannot read by region offset: %d"
 var ErrorMessageIndexOutOfRange = "Index out of range: #%d vs. #%d"
-var ErrorMessageIndexedChunkOutOfRange = "The chunk of index #%d is out of range"
+var ErrorMessageIndexedChunkOutOfRange = "The target chunk of index #%d is out of range"
 
 // Heap is used to allocate memories
 // to store data used by guest languages
@@ -785,7 +785,7 @@ func (w *WrappedChunk) WriteLength(length uint8) error {
 // region address: 11 + 0 * 4  - [ 32bits pointer ]
 //                 11 + 1 * 4  - [ 32bits pointer ]
 //
-func (w *WrappedChunk) Append(pointee *Mono) error {
+func (w *WrappedChunk) Append(element *Mono) error {
 
 	// The latest unoccupied slot in this chunk is its length.
 	// [#0, #1, #2, (empty),..] --> length: 3, so [#3] is the empty slot.
@@ -798,7 +798,7 @@ func (w *WrappedChunk) Append(pointee *Mono) error {
 		return errors.New(ErrorMessageChunkFull)
 	}
 	atWriteTo := w.OffsetFromIndex(currentLength)
-	w.mono.region.WriteAddress(atWriteTo, pointee.beginFrom)
+	w.mono.region.WriteAddress(atWriteTo, element.beginFrom)
 	w.WriteLength(currentLength + 1)
 	return nil
 }
@@ -903,12 +903,14 @@ func NewWrappedArray(mono *Mono) *WrappedArray {
 	}
 }
 
+// Return array length (how many elements inside)
 func (wa *WrappedArray) ReadLength() (uint32, error) {
 	// NOTE: since we used Uint8 array, default should be 0,
 	// so the new array will have 0 length as we want.
 	return wa.mono.region.ReadUint32(wa.atLength)
 }
 
+// When the array is appended with a new element, update its length.
 func (wa *WrappedArray) WriteLength(length uint32) error {
 	return wa.mono.region.WriteUint32(wa.atLength, length)
 }
@@ -935,6 +937,31 @@ func (wa *WrappedArray) Index(idx uint32) (*Mono, error) {
 	// Index inside the chunk.
 	idxChunk := uint8(idx % MONO_CHUNK_SIZE)
 	return chunk.Index(idxChunk)
+}
+
+func (wa *WrappedArray) Append(element *Mono) error {
+	length, err := wa.ReadLength()
+	if err != nil {
+		return err
+	}
+
+	valid, last, err := wa.findChunk(length)
+	if err != nil {
+		return err
+	}
+
+	// array[length] to append at the next chunk which is not yet there.
+	// Like, now it tries to append at array[8] == chunk#1, while array[0 - 7] is at chunk#0
+	if last == nil || last.IsFull() {
+		newChunk, err := wa.mono.region.heap.allocator.Chunk()
+		if err != nil {
+			return err
+		}
+		valid.setNext(newChunk.mono.beginFrom)
+		last = newChunk
+	}
+	last.Append(element)
+	wa.WriteLength(length + 1)
 }
 
 // Find a chunk the index should be in.
@@ -1008,4 +1035,17 @@ func (wa *WrappedArray) traverseChunks(cb func(*WrappedChunk) error) error {
 		}
 	}
 	return nil
+}
+
+func (wa *WrappedArray) lastChunk() (*WrappedChunk, error) {
+	_, last, err := wa.findChunk(wa.ReadLength() - 1)
+	if err != nil {
+		return nil, err
+	}
+
+	if last == nil {
+		return nil, errors.New(fmt.Sprintf(ErrorMessageIndexedChunkOutOfRange, idx))
+	}
+
+	return last, nil
 }
